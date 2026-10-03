@@ -1,0 +1,125 @@
+package io.mts.bridge;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+
+import org.junit.jupiter.api.Test;
+
+import io.mts.bridge.Model.Instrument;
+
+/** The real IB client against a minimal fake Gateway speaking the v100+ handshake (text messages). */
+class SocketIbClientTest {
+
+	private static final int SERVER_VERSION = 176;
+
+	/** Accepts one client, completes the handshake, sends next id + accounts, records request message ids. */
+	static final class FakeGateway implements AutoCloseable {
+		final ServerSocket server;
+		final List<String> received = new CopyOnWriteArrayList<>();
+		volatile String header;
+		private volatile Socket socket;
+
+		FakeGateway() throws IOException {
+			server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+			Thread.ofVirtual().start(this::serve);
+		}
+
+		int port() {
+			return server.getLocalPort();
+		}
+
+		private void serve() {
+			try (Socket s = server.accept()) {
+				socket = s;
+				DataInputStream in = new DataInputStream(s.getInputStream());
+				DataOutputStream out = new DataOutputStream(s.getOutputStream());
+				byte[] api = in.readNBytes(4);
+				header = new String(api, StandardCharsets.US_ASCII) + new String(frame(in), StandardCharsets.US_ASCII);
+				send(out, SERVER_VERSION + "", "20261003 16:00:00 EST");
+				received.add(firstField(frame(in))); // START_API
+				send(out, "9", "1", "5");
+				send(out, "15", "1", "DU1234567");
+				while (true) {
+					received.add(firstField(frame(in)));
+				}
+			} catch (IOException e) {
+				// client or test closed the socket
+			}
+		}
+
+		void dropClient() throws IOException {
+			socket.close();
+		}
+
+		private static byte[] frame(DataInputStream in) throws IOException {
+			return in.readNBytes(in.readInt());
+		}
+
+		private static String firstField(byte[] msg) {
+			String s = new String(msg, StandardCharsets.US_ASCII);
+			return s.substring(0, s.indexOf('\0'));
+		}
+
+		private static void send(DataOutputStream out, String... fields) throws IOException {
+			ByteArrayOutputStream b = new ByteArrayOutputStream();
+			for (String f : fields) {
+				b.writeBytes(f.getBytes(StandardCharsets.US_ASCII));
+				b.write(0);
+			}
+			out.writeInt(b.size());
+			out.write(b.toByteArray());
+			out.flush();
+		}
+
+		@Override
+		public void close() throws IOException {
+			server.close();
+		}
+	}
+
+	private static void waitFor(BooleanSupplier cond) throws InterruptedException {
+		long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+		while (!cond.getAsBoolean() && System.nanoTime() < until) {
+			Thread.sleep(10);
+		}
+		assertTrue(cond.getAsBoolean());
+	}
+
+	@Test
+	void handshakeCallbacksRequestsAndClose() throws Exception {
+		BridgeState state = new BridgeState();
+		IbCallbacks callbacks = new IbCallbacks(state, new EventHub(), false);
+		SocketIbClient client = new SocketIbClient(callbacks);
+		try (FakeGateway gw = new FakeGateway()) {
+			assertTrue(client.connect("127.0.0.1", gw.port(), 11));
+			assertTrue(gw.header.startsWith("API\0v100.."), gw.header);
+			assertEquals(SERVER_VERSION, client.serverVersion());
+			state.connected(true, client.serverVersion());
+
+			waitFor(() -> state.nextOrderId.get() == 5);
+			waitFor(() -> "DU*****67".equals(state.status(false).accounts()));
+			assertEquals("71", gw.received.get(0), "START_API");
+
+			client.reqMktData(1001, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), "", true);
+			waitFor(() -> gw.received.contains("1"));  // REQ_MKT_DATA
+
+			gw.dropClient();
+			waitFor(() -> !state.connected());
+			assertFalse(client.isConnected());
+		}
+	}
+}
