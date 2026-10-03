@@ -1,0 +1,34 @@
+This product includes software developed by third parties, listed below.
+Full license texts are located in THIRD_PARTY_LICENSES/.
+
+================================================================================
+
+This project includes Google Protocol Buffers
+Copyright 2008 Google Inc. All rights reserved.
+Licensed under the BSD 3-Clause License - see THIRD_PARTY_LICENSES/BSD-3-CLAUSE.txt
+Source: https://github.com/protocolbuffers/protobuf
+
+  protobuf-java 4.29.5 (source/javaclient/jars/protobuf-java-4.29.5.jar)
+  Google.Protobuf 3.29.5 (Google.Protobuf.dll)
+  protobuf 5.29.5 (Python runtime dependency)
+
+================================================================================
+
+This project includes JDDE (jdde-bundle)
+Copyright 2013 www.pretty-tools.com
+Authors: Alexander Kozlov, Svetlozar Argirov
+Licensed under the Apache License, Version 2.0 - see THIRD_PARTY_LICENSES/APACHE-2.0.txt
+Source: https://github.com/zaro/jdde-bundle
+Original site (offline): http://jdde.pretty-tools.com
+
+================================================================================
+
+This project includes the following Microsoft .NET base class library assemblies
+Copyright (c) .NET Foundation and Contributors
+Licensed under the MIT License - see THIRD_PARTY_LICENSES/MIT.txt
+Source: https://github.com/dotnet/runtime
+
+  System.Buffers 4.4.0
+  System.Memory 4.5.3
+  System.Numerics.Vectors 4.4.0
+  System.Runtime.CompilerServices.Unsafe 4.5.2
