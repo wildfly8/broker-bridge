@@ -3,8 +3,9 @@ package io.github.wildfly8.brokerbridge;
 import java.util.Map;
 
 /** Bridge settings from environment variables. Invalid values fail startup. */
+/** {@code dataDir} null: order events are kept for replay in memory only (lost on restart). */
 public record BridgeConfig(String ibHost, int ibPort, int ibClientId, String bind, int port, boolean ordersEnabled,
-		int marketDataType) {
+		int marketDataType, String dataDir, int replayMax) {
 
 	public static BridgeConfig fromEnv(Map<String, String> env) {
 		return new BridgeConfig(
@@ -14,7 +15,9 @@ public record BridgeConfig(String ibHost, int ibPort, int ibClientId, String bin
 				text(env, "BRIDGE_BIND", "127.0.0.1"),
 				port(env, "BRIDGE_PORT", 8090),
 				"true".equalsIgnoreCase(text(env, "BRIDGE_ORDERS_ENABLED", "false")),
-				integer(env, "IB_MARKET_DATA_TYPE", 1, 1, 4));
+				integer(env, "IB_MARKET_DATA_TYPE", 1, 1, 4),
+				env.get("BRIDGE_DATA_DIR") == null || env.get("BRIDGE_DATA_DIR").isBlank() ? null : env.get("BRIDGE_DATA_DIR").trim(),
+				integer(env, "BRIDGE_REPLAY_MAX", 100_000, 1, 10_000_000));
 	}
 
 	private static String text(Map<String, String> env, String key, String def) {

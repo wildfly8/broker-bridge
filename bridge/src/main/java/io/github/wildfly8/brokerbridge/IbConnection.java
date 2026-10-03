@@ -88,6 +88,8 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		}
 		client.reqMarketDataType(config.marketDataType());
 		client.reqIds();
+		// fills made while the bridge was disconnected; already-delivered ones are dropped by fill id
+		client.reqExecutions(state.newRequestId(), config.ibClientId());
 		state.connected(true, client.serverVersion());
 		state.lastError(null);
 		log.info("Connected to IB, server version {}", client.serverVersion());

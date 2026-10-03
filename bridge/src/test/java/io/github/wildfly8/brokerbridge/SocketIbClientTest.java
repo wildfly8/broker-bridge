@@ -102,7 +102,7 @@ class SocketIbClientTest {
 	@Test
 	void handshakeCallbacksRequestsAndClose() throws Exception {
 		BridgeState state = new BridgeState();
-		IbCallbacks callbacks = new IbCallbacks(state, new EventHub(), false);
+		IbCallbacks callbacks = new IbCallbacks(state, new EventHub(EventLog.inMemory(1000, System.currentTimeMillis())), false);
 		SocketIbClient client = new SocketIbClient(callbacks);
 		try (FakeGateway gw = new FakeGateway()) {
 			assertTrue(client.connect("127.0.0.1", gw.port(), 11));

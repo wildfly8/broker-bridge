@@ -10,14 +10,17 @@ COPY bridge/src bridge/src
 RUN mvn -B -q -DskipTests package
 
 FROM eclipse-temurin:25-jre-alpine
-RUN addgroup -S bridge && adduser -S bridge -G bridge
+RUN addgroup -S bridge && adduser -S bridge -G bridge && mkdir /data && chown bridge:bridge /data
 WORKDIR /app
 COPY --from=build /src/bridge/target/broker-bridge.jar app.jar
 COPY LICENSE third_party/ib-tws-api/NOTICE ./
 USER bridge
 # Defaults: paper Gateway on localhost, API on localhost, orders refused.
 ENV IB_HOST=127.0.0.1 IB_PORT=4002 IB_CLIENT_ID=11 \
-    BRIDGE_BIND=127.0.0.1 BRIDGE_PORT=8090 BRIDGE_ORDERS_ENABLED=false
+    BRIDGE_BIND=127.0.0.1 BRIDGE_PORT=8090 BRIDGE_ORDERS_ENABLED=false \
+    BRIDGE_DATA_DIR=/data
+# Order-event journal for replay across restarts; mount a volume here.
+VOLUME /data
 EXPOSE 8090
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s \
   CMD wget -qO- "http://127.0.0.1:${BRIDGE_PORT}/v1/status" >/dev/null || exit 1

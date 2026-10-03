@@ -1,6 +1,7 @@
 package io.github.wildfly8.brokerbridge;
 
 import java.net.InetAddress;
+import java.nio.file.Path;
 import java.time.Duration;
 
 import org.slf4j.Logger;
@@ -30,10 +31,18 @@ public final class BridgeMain {
 					+ "make sure nothing outside this host can reach it", config.bind());
 		}
 		BridgeState state = new BridgeState();
-		EventHub hub = new EventHub();
+		EventLog eventLog;
+		if (config.dataDir() == null) {
+			log.warn("BRIDGE_DATA_DIR is not set: order events can be replayed after a client reconnect, "
+					+ "but not after a bridge restart");
+			eventLog = EventLog.inMemory(config.replayMax(), System.currentTimeMillis());
+		} else {
+			eventLog = EventLog.open(Path.of(config.dataDir()), config.replayMax(), System.currentTimeMillis());
+		}
+		EventHub hub = new EventHub(eventLog);
 		IbCallbacks callbacks = new IbCallbacks(state, hub, config.ordersEnabled());
 		IbClient client = new SocketIbClient(callbacks);
-		BrokerService broker = new BrokerService(client, state, config.ordersEnabled());
+		BrokerService broker = new BrokerService(client, state, config.ordersEnabled(), eventLog);
 		IbConnection connection = new IbConnection(config, client, state, hub, broker, Duration.ofSeconds(5),
 				Duration.ofSeconds(120));
 		callbacks.listener(connection);
@@ -48,6 +57,7 @@ public final class BridgeMain {
 			log.info("broker-bridge stopping");
 			connection.stop();
 			server.stop();
+			eventLog.close();
 		}, "shutdown"));
 		Thread.currentThread().join();
 	}

@@ -36,11 +36,17 @@ final class BrokerService {
 	private final IbClient client;
 	private final BridgeState state;
 	private final boolean ordersEnabled;
+	private final EventLog eventLog;
 
-	BrokerService(IbClient client, BridgeState state, boolean ordersEnabled) {
+	BrokerService(IbClient client, BridgeState state, boolean ordersEnabled, EventLog eventLog) {
 		this.client = client;
 		this.state = state;
 		this.ordersEnabled = ordersEnabled;
+		this.eventLog = eventLog;
+		for (EventLog.OrderRecord o : eventLog.orders()) {
+			state.ordersByIbId.put(o.brokerOrderId(), new OrderRef(o.clientOrderId(), o.tag(), o.instrument()));
+			state.ibIdByClientOrderId.put(o.clientOrderId(), o.brokerOrderId());
+		}
 	}
 
 	ConnectionStatus status() {
@@ -170,6 +176,9 @@ final class BrokerService {
 		com.ib.client.Order order = Orders.toIb(r, ibId);
 		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.tag(), r.instrument()));
 		state.ibIdByClientOrderId.put(clientOrderId, ibId);
+		if (!Boolean.TRUE.equals(r.modify())) {
+			eventLog.recordOrder(new EventLog.OrderRecord(clientOrderId, ibId, r.tag(), r.instrument()));
+		}
 		client.placeOrder(ibId, contract, order);
 		log.info("{} order {} (broker {}) {} {} {} @ {}", Boolean.TRUE.equals(r.modify()) ? "Modified" : "Placed",
 				clientOrderId, ibId, r.side(), r.quantity(), r.instrument().symbol(), r.limitPrice());

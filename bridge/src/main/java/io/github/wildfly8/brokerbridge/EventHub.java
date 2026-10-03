@@ -9,15 +9,21 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Fans events out to SSE clients. A client that falls too far behind is dropped (it reconnects). */
+/**
+ * Fans events out to SSE clients. Every event gets an id from the {@link EventLog}; order events are also kept
+ * there for replay. A client that falls too far behind is dropped (it reconnects and replays).
+ */
 final class EventHub {
 
 	private static final Logger log = LoggerFactory.getLogger(EventHub.class);
 
 	static final String HEARTBEAT = ": heartbeat\n\n";
 
+	/** One SSE frame; {@code id} is 0 for frames without an id line. */
+	record Frame(long id, String text) {}
+
 	static final class Client {
-		private final BlockingQueue<String> frames;
+		private final BlockingQueue<Frame> frames;
 		private volatile boolean dropped;
 
 		Client(int capacity) {
@@ -30,14 +36,20 @@ final class EventHub {
 	}
 
 	private final Set<Client> clients = ConcurrentHashMap.newKeySet();
+	private final EventLog eventLog;
 	private final int capacity;
 
-	EventHub() {
-		this(10_000);
+	EventHub(EventLog eventLog) {
+		this(eventLog, 10_000);
 	}
 
-	EventHub(int capacity) {
+	EventHub(EventLog eventLog, int capacity) {
+		this.eventLog = eventLog;
 		this.capacity = capacity;
+	}
+
+	EventLog eventLog() {
+		return eventLog;
 	}
 
 	Client register() {
@@ -54,34 +66,42 @@ final class EventHub {
 		return clients.size();
 	}
 
+	/** Live-only event (quotes, connection, snapshot-end, non-order errors). */
 	void publish(String event, Object data) {
-		String frame = frame(event, data);
+		publish(event, data, false);
+	}
+
+	/** Order event (order-status, fill, order error): also kept for replay and journaled. */
+	void publishOrderEvent(String event, Object data) {
+		publish(event, data, true);
+	}
+
+	/** Synchronized so frames reach every client in id order. */
+	private synchronized void publish(String event, Object data, boolean keep) {
+		long id = eventLog.nextId();
+		if (keep) {
+			eventLog.keepOrderEvent(id, event, data);
+		}
+		Frame frame = new Frame(id, frame(id, event, Json.write(data)));
 		for (Client c : clients) {
 			if (!c.frames.offer(frame)) {
 				c.dropped = true;
 				clients.remove(c);
-				log.warn("Dropped a slow event-stream client ({} events queued)", capacity);
+				log.warn("Dropped a slow event-stream client ({} events queued); it can reconnect and replay", capacity);
 			}
 		}
 	}
 
-	/** Sends one event to one client only (e.g. the current status on connect). */
-	void send(Client c, String event, Object data) {
-		if (!c.frames.offer(frame(event, data))) {
-			c.dropped = true;
-		}
-	}
-
 	/** Next frame for the client, a heartbeat after {@code timeoutMs} of silence, or null once dropped. */
-	String next(Client c, long timeoutMs) throws InterruptedException {
+	Frame next(Client c, long timeoutMs) throws InterruptedException {
 		if (c.dropped) {
 			return null;
 		}
-		String f = c.frames.poll(timeoutMs, TimeUnit.MILLISECONDS);
-		return f != null ? f : c.dropped ? null : HEARTBEAT;
+		Frame f = c.frames.poll(timeoutMs, TimeUnit.MILLISECONDS);
+		return f != null ? f : c.dropped ? null : new Frame(0, HEARTBEAT);
 	}
 
-	static String frame(String event, Object data) {
-		return "event: " + event + "\ndata: " + Json.write(data) + "\n\n";
+	static String frame(long id, String event, String json) {
+		return (id > 0 ? "id: " + id + "\n" : "") + "event: " + event + "\ndata: " + json + "\n\n";
 	}
 }

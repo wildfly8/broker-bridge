@@ -34,7 +34,7 @@ class IbCallbacksTest {
 	@BeforeEach
 	void setUp() {
 		state = new BridgeState();
-		hub = new EventHub();
+		hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
 		events = hub.register();
 		callbacks = new IbCallbacks(state, hub, false);
 		state.subscriptions.put(42, new SubscriptionRequest(Instrument.stock("SPY", "SMART", "USD"), "3", false, null));
@@ -44,9 +44,10 @@ class IbCallbacksTest {
 	private List<String[]> drain() throws Exception {
 		List<String[]> out = new ArrayList<>();
 		String f;
-		while (!(f = hub.next(events, 1)).equals(EventHub.HEARTBEAT)) {
+		while (!(f = hub.next(events, 1).text()).equals(EventHub.HEARTBEAT)) {
 			String[] lines = f.split("\n");
-			out.add(new String[] { lines[0].substring("event: ".length()), lines[1].substring("data: ".length()) });
+			int i = lines[0].startsWith("id: ") ? 1 : 0;
+			out.add(new String[] { lines[i].substring("event: ".length()), lines[i + 1].substring("data: ".length()) });
 		}
 		return out;
 	}
@@ -218,6 +219,24 @@ class IbCallbacksTest {
 		assertEquals(7001, err.get("clientOrderId").asLong());
 		assertNull(err.get("requestId"));
 		assertEquals(201, err.get("code").asInt());
+	}
+
+	@Test
+	void fillsAreDeliveredOnceAndKeptForReplay() throws Exception {
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
+		Execution e = new Execution(7, 11, "0002.01", "20261002 10:00:00", "DU1234567", "ARCA", "SLD",
+				Decimal.get(BigDecimal.valueOf(5)), 10.0, 1L, 0, Decimal.get(BigDecimal.valueOf(5)), 10.0, "ref-1",
+				"", 0, "", null, false, null, null);
+		callbacks.execDetails(-1, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), e);
+		callbacks.execDetails(99, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), e); // again, from reqExecutions
+		List<String[]> ev = drain();
+		assertEquals(1, ev.size());
+		assertEquals("fill", ev.get(0)[0]);
+		List<EventLog.Entry> kept = hub.eventLog().after(0);
+		assertEquals(1, kept.size());
+		assertEquals("fill", kept.get(0).event());
+		callbacks.tickPrice(42, 1, 1.0, new TickAttrib());
+		assertEquals(1, hub.eventLog().after(0).size(), "quotes are not kept");
 	}
 
 	@Test

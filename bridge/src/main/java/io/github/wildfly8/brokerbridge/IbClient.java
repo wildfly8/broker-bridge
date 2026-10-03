@@ -33,4 +33,7 @@ interface IbClient {
 	void cancelOrder(int ibOrderId);
 
 	void reqIds();
+
+	/** Today's executions for this client id; they arrive as execDetails callbacks. */
+	void reqExecutions(int reqId, int clientId);
 }

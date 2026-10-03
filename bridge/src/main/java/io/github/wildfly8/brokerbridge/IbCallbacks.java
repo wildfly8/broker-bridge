@@ -176,7 +176,7 @@ class IbCallbacks extends DefaultEWrapper {
 			log.debug("Status for an order this bridge didn't place: {} {}", orderId, status);
 			return;
 		}
-		hub.publish("order-status", new OrderStatusEvent(ref.clientOrderId(), status, number(filled),
+		hub.publishOrderEvent("order-status", new OrderStatusEvent(ref.clientOrderId(), status, number(filled),
 				number(remaining), avgFillPrice, lastFillPrice, String.valueOf(permId),
 				parentId == 0 ? null : String.valueOf(parentId), ref.tag(), whyHeld));
 	}
@@ -188,12 +188,16 @@ class IbCallbacks extends DefaultEWrapper {
 			log.debug("Fill for an order this bridge didn't place: {}", e.orderId());
 			return;
 		}
+		if (!hub.eventLog().firstFill(e.execId())) {
+			log.debug("Fill {} already delivered", e.execId());
+			return;
+		}
 		String side = switch (String.valueOf(e.side())) {
 			case "BOT" -> "BOUGHT";
 			case "SLD" -> "SOLD";
 			default -> e.side();
 		};
-		hub.publish("fill", new FillEvent(ref.clientOrderId(), e.execId(), side, number(e.shares()), e.price(),
+		hub.publishOrderEvent("fill", new FillEvent(ref.clientOrderId(), e.execId(), side, number(e.shares()), e.price(),
 				e.avgPrice(), number(e.cumQty()), e.exchange(), String.valueOf(e.permId()), ref.tag(), e.time(),
 				Contracts.fromIb(contract)));
 	}
@@ -257,7 +261,7 @@ class IbCallbacks extends DefaultEWrapper {
 		}
 		OrderRef order = state.ordersByIbId.get(id);
 		if (order != null) {
-			hub.publish("error", new ErrorEvent(null, order.clientOrderId(), code, text, retryable));
+			hub.publishOrderEvent("error", new ErrorEvent(null, order.clientOrderId(), code, text, retryable));
 			return;
 		}
 		if (!warning) {

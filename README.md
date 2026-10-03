@@ -34,6 +34,8 @@ docker run --rm --network host broker-bridge
 | `IB_MARKET_DATA_TYPE` | `1` | 1 live, 2 frozen, 3 delayed, 4 delayed-frozen |
 | `BRIDGE_BIND` / `BRIDGE_PORT` | `127.0.0.1` / `8090` | API listen address; the API has **no authentication** |
 | `BRIDGE_ORDERS_ENABLED` | `false` | only `true` lets orders through |
+| `BRIDGE_DATA_DIR` | unset (image: `/data`) | journal of order events and order ids, so replay survives a restart |
+| `BRIDGE_REPLAY_MAX` | `100000` | order events kept for replay |
 | `LOG_LEVEL` | `INFO` | |
 
 ## API v1
@@ -60,6 +62,16 @@ optionPrice, underlyingPrice}, time}`. `code` is the broker's numeric field code
 4 last, 5 last size, 6 high, 7 low, 8 volume, 9 close, 10–13 option computations, 14 open, 45 last timestamp);
 delayed-data codes are reported as their live equivalents.
 
+**Event ids and resume**: every event has an SSE `id:` (a number that keeps increasing, also
+across restarts). Order events (`order-status`, `fill`, and `error` with a `clientOrderId`)
+are kept and, with `BRIDGE_DATA_DIR`, journaled to disk (fsync per event). Reconnect with the
+standard `Last-Event-ID: <id>` header (or `/v1/events?lastEventId=<id>`) to get every kept order
+event after that id, in order, followed by live events, with no gap or repeat in between. Quotes
+are not replayed. If the id is older than what was kept you first get
+`event: replay-truncated` `{after, oldestKept}`. On every IB connection the bridge also asks IB
+for the day's executions, so fills made while it was down are sent too. Fills are unique by
+`fillId`; delivery is at-least-once, so clients should ignore a `fillId` they already have.
+
 **Tags**: `tag` is any string the client chooses for a subscription or order (e.g. which
 of its components should get the data). Every quote, snapshot-end, order-status and fill
 event that results from it carries the same `tag`. `orderRef` is passed to the broker as
@@ -71,8 +83,8 @@ the order reference.
   doubling up to 120 s, then re-sends active streaming subscriptions. Pending snapshot/history/resolve requests
   fail with 503 when the session drops.
 - Order ids: the caller's `clientOrderId` is mapped to IB's order id inside the bridge; status, fills and order
-  errors come back with the `clientOrderId`. The mapping is in memory: after a bridge restart, earlier orders'
-  events are not forwarded.
+  errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
+  earlier orders still arrive after a bridge restart.
 - Account ids are masked in logs, status and events (`DU*****67`).
 
 ## Layout

@@ -10,6 +10,7 @@ import com.ib.client.EClientSocket;
 import com.ib.client.EJavaSignal;
 import com.ib.client.EReader;
 import com.ib.client.EWrapper;
+import com.ib.client.ExecutionFilter;
 import com.ib.client.Order;
 import com.ib.client.OrderCancel;
 
@@ -108,5 +109,12 @@ final class SocketIbClient implements IbClient {
 	@Override
 	public void reqIds() {
 		socket.reqIds(-1);
+	}
+
+	@Override
+	public void reqExecutions(int reqId, int clientId) {
+		ExecutionFilter filter = new ExecutionFilter();
+		filter.clientId(clientId);
+		socket.reqExecutions(reqId, filter);
 	}
 }

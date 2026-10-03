@@ -21,6 +21,16 @@ class BridgeConfigTest {
 		assertEquals(8090, c.port());
 		assertFalse(c.ordersEnabled());
 		assertEquals(1, c.marketDataType());
+		assertEquals(null, c.dataDir());
+		assertEquals(100_000, c.replayMax());
+	}
+
+	@Test
+	void durableReplaySettings() {
+		BridgeConfig c = BridgeConfig.fromEnv(Map.of("BRIDGE_DATA_DIR", " /data ", "BRIDGE_REPLAY_MAX", "500"));
+		assertEquals("/data", c.dataDir());
+		assertEquals(500, c.replayMax());
+		assertThrows(IllegalArgumentException.class, () -> BridgeConfig.fromEnv(Map.of("BRIDGE_REPLAY_MAX", "0")));
 	}
 
 	@Test

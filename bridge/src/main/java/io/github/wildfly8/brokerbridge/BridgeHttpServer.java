@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -143,21 +144,66 @@ final class BridgeHttpServer {
 		expect(ex, "GET", "/v1/events");
 		ex.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
 		ex.getResponseHeaders().set("Cache-Control", "no-cache");
+		Long after = lastEventId(ex);
 		ex.sendResponseHeaders(200, 0);
+		// register before reading the replay so nothing published in between is missed
 		EventHub.Client client = hub.register();
-		hub.send(client, "connection", broker.status());
-		log.info("Event-stream client connected ({} total)", hub.clientCount());
+		EventLog eventLog = hub.eventLog();
+		long replayedUpTo = 0;
 		try (OutputStream out = ex.getResponseBody()) {
-			String frame;
+			write(out, EventHub.frame(0, "connection", Json.write(broker.status())));
+			if (after != null) {
+				if (eventLog.truncatedAfter(after)) {
+					log.warn("Client asked to replay after {}, older than kept events (oldest {})", after, eventLog.oldestKept());
+					write(out, EventHub.frame(0, "replay-truncated",
+							Json.write(Map.of("after", after, "oldestKept", eventLog.oldestKept()))));
+				}
+				List<EventLog.Entry> replay = eventLog.after(after);
+				for (EventLog.Entry e : replay) {
+					write(out, EventHub.frame(e.id(), e.event(), e.json()));
+					replayedUpTo = e.id();
+				}
+				log.info("Event-stream client resumed after {}: replayed {} order events", after, replay.size());
+			}
+			log.info("Event-stream client connected ({} total)", hub.clientCount());
+			EventHub.Frame frame;
 			while ((frame = hub.next(client, heartbeatMs)) != null) {
-				out.write(frame.getBytes(StandardCharsets.UTF_8));
-				out.flush();
+				if (frame.id() != 0 && frame.id() <= replayedUpTo) {
+					continue; // already sent in the replay
+				}
+				write(out, frame.text());
 			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		} finally {
 			hub.unregister(client);
 			log.info("Event-stream client disconnected ({} left)", hub.clientCount());
+		}
+	}
+
+	private static void write(OutputStream out, String frame) throws IOException {
+		out.write(frame.getBytes(StandardCharsets.UTF_8));
+		out.flush();
+	}
+
+	/** {@code Last-Event-ID} header, else {@code ?lastEventId=}; null when absent. */
+	private static Long lastEventId(HttpExchange ex) {
+		String v = ex.getRequestHeaders().getFirst("Last-Event-ID");
+		String q = ex.getRequestURI().getRawQuery();
+		if ((v == null || v.isBlank()) && q != null) {
+			for (String part : q.split("&")) {
+				if (part.startsWith("lastEventId=")) {
+					v = part.substring("lastEventId=".length());
+				}
+			}
+		}
+		if (v == null || v.isBlank()) {
+			return null;
+		}
+		try {
+			return Long.parseLong(v.trim());
+		} catch (NumberFormatException e) {
+			throw new ApiException(400, "Last-Event-ID is not an event id: " + v);
 		}
 	}
 

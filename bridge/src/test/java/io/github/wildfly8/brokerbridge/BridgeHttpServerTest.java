@@ -37,12 +37,12 @@ class BridgeHttpServerTest {
 
 	private void start(boolean ordersEnabled, boolean connected) throws Exception {
 		state = new BridgeState();
-		hub = new EventHub();
+		hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
 		ib = new FakeIbClient();
 		ib.connected = connected;
 		state.connected(connected, connected ? 222 : null);
 		callbacks = new IbCallbacks(state, hub, ordersEnabled);
-		BrokerService broker = new BrokerService(ib, state, ordersEnabled);
+		BrokerService broker = new BrokerService(ib, state, ordersEnabled, hub.eventLog());
 		server = new BridgeHttpServer("127.0.0.1", 0, broker, hub, 200);
 		server.start();
 	}
@@ -224,11 +224,96 @@ class BridgeHttpServerTest {
 			waitFor(() -> hub.clientCount() == 1);
 			state.subscriptions.put(42, new Model.SubscriptionRequest(Model.Instrument.stock("SPY", "SMART", "USD"), "1", false, null));
 			callbacks.tickPrice(42, 4, 501.0, new TickAttrib());
+			assertTrue(in.readLine().matches("id: \\d+"), "every live event has an id");
 			assertEquals("event: quote", in.readLine());
 			assertTrue(in.readLine().contains("\"field\":\"LAST\""));
 			assertEquals("", in.readLine());
 			assertEquals(": heartbeat", in.readLine());
 		}
+	}
+
+	/** Reads SSE frames as [id or "", event, data] until {@code n} frames of {@code event} have arrived. */
+	private static java.util.List<String[]> readUntil(BufferedReader in, String event, int n) throws Exception {
+		java.util.List<String[]> frames = new java.util.ArrayList<>();
+		int seen = 0;
+		String id = "";
+		String name = null;
+		String line;
+		while (seen < n && (line = in.readLine()) != null) {
+			if (line.startsWith("id: ")) {
+				id = line.substring(4);
+			} else if (line.startsWith("event: ")) {
+				name = line.substring(7);
+			} else if (line.startsWith("data: ")) {
+				frames.add(new String[] { id, name, line.substring(6) });
+				if (event.equals(name)) {
+					seen++;
+				}
+				id = "";
+				name = null;
+			}
+		}
+		return frames;
+	}
+
+	private HttpResponse<InputStream> openEvents(String query, String lastEventId) throws Exception {
+		HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/events" + query));
+		if (lastEventId != null) {
+			b.header("Last-Event-ID", lastEventId);
+		}
+		return http.send(b.build(), HttpResponse.BodyHandlers.ofInputStream());
+	}
+
+	private void orderStatus(String status) {
+		callbacks.orderStatus(10, status, Decimal.ZERO, Decimal.get(BigDecimal.valueOf(100)), 0, 1L, 0, 0, 11, null, 0);
+	}
+
+	@Test
+	void reconnectingClientGetsMissedOrderEventsThenLiveOnesWithoutDuplicates() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		orderStatus("PreSubmitted");
+		orderStatus("Submitted");
+		orderStatus("Filled");
+		java.util.List<EventLog.Entry> kept = hub.eventLog().after(0);
+		assertEquals(3, kept.size());
+		long firstId = kept.get(0).id();
+
+		HttpResponse<InputStream> r = openEvents("", String.valueOf(firstId));
+		try (BufferedReader in = new BufferedReader(new InputStreamReader(r.body(), StandardCharsets.UTF_8))) {
+			java.util.List<String[]> replayed = readUntil(in, "order-status", 2);
+			assertEquals("connection", replayed.get(0)[1], "current status first");
+			assertEquals(String.valueOf(kept.get(1).id()), replayed.get(1)[0]);
+			assertTrue(replayed.get(1)[2].contains("\"status\":\"Submitted\""));
+			assertTrue(replayed.get(2)[2].contains("\"status\":\"Filled\""));
+			waitFor(() -> hub.clientCount() == 1);
+			orderStatus("Cancelled");
+			java.util.List<String[]> live = readUntil(in, "order-status", 1);
+			String[] last = live.get(live.size() - 1);
+			assertTrue(last[2].contains("Cancelled"));
+			assertTrue(Long.parseLong(last[0]) > kept.get(2).id(), "ids keep increasing; nothing repeated at the seam");
+		}
+	}
+
+	@Test
+	void resumeByQueryParameterAndTruncationNotice() throws Exception {
+		start(false, true);
+		state.ordersByIbId.put(10, new BridgeState.OrderRef(7001L, "4", Model.Instrument.stock("SPY", "SMART", "USD")));
+		orderStatus("Submitted");
+		long id = hub.eventLog().after(0).get(0).id();
+		HttpResponse<InputStream> r = openEvents("?lastEventId=" + (id - 1), null);
+		try (BufferedReader in = new BufferedReader(new InputStreamReader(r.body(), StandardCharsets.UTF_8))) {
+			java.util.List<String[]> frames = readUntil(in, "order-status", 1);
+			assertEquals(String.valueOf(id), frames.get(frames.size() - 1)[0]);
+		}
+		HttpResponse<InputStream> old = openEvents("", "1");
+		try (BufferedReader in = new BufferedReader(new InputStreamReader(old.body(), StandardCharsets.UTF_8))) {
+			java.util.List<String[]> frames = readUntil(in, "order-status", 1);
+			assertEquals("replay-truncated", frames.get(1)[1], "an id from before this process can't be fully replayed");
+			assertTrue(frames.get(1)[2].contains("\"after\":1"));
+		}
+		assertEquals(400, openEvents("", "abc").statusCode());
 	}
 
 	private static void waitFor(java.util.function.BooleanSupplier cond) throws InterruptedException {

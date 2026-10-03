@@ -19,6 +19,7 @@ class FakeIbClient implements IbClient {
 	volatile BiConsumer<Integer, Boolean> onMktData = (id, snapshot) -> {};
 	volatile BiConsumer<Integer, Contract> onHistory = (id, c) -> {};
 	volatile BiConsumer<Integer, Contract> onDetails = (id, c) -> {};
+	volatile java.util.function.IntConsumer onExecutions = id -> {};
 
 	@Override
 	public boolean connect(String host, int port, int clientId) {
@@ -96,6 +97,12 @@ class FakeIbClient implements IbClient {
 	@Override
 	public void reqIds() {
 		calls.add("reqIds");
+	}
+
+	@Override
+	public void reqExecutions(int reqId, int clientId) {
+		calls.add("executions " + reqId + " " + clientId);
+		onExecutions.accept(reqId);
 	}
 
 	long count(String prefix) {

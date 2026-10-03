@@ -27,11 +27,11 @@ class IbConnectionTest {
 	void retriesWithBackoffThenResubscribesAfterReconnect() throws Exception {
 		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of("IB_MARKET_DATA_TYPE", "3"));
 		BridgeState state = new BridgeState();
-		EventHub hub = new EventHub();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
 		EventHub.Client events = hub.register();
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
-		BrokerService broker = new BrokerService(ib, state, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
 		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
 		callbacks.listener(conn);
 		state.subscriptions.put(42, new SubscriptionRequest(Instrument.stock("SPY", "SMART", "USD"), "1", false, "100"));
@@ -47,6 +47,7 @@ class IbConnectionTest {
 			assertTrue(ib.calls.contains("connect 127.0.0.1:4002 11"));
 			assertTrue(ib.calls.contains("marketDataType 3"));
 			assertTrue(ib.calls.contains("reqIds"));
+			assertTrue(ib.calls.stream().anyMatch(c -> c.matches("executions \\d+ 11")), "fills made while disconnected are requested: " + ib.calls);
 			assertTrue(ib.calls.contains("mktData 42 SPY [100] false"), ib.calls.toString());
 			assertFalse(state.subscriptions.containsKey(43), "one-shot snapshots are not re-sent");
 
@@ -59,7 +60,7 @@ class IbConnectionTest {
 
 			StringBuilder seen = new StringBuilder();
 			String f;
-			while (!(f = hub.next(events, 1)).equals(EventHub.HEARTBEAT)) {
+			while (!(f = hub.next(events, 1).text()).equals(EventHub.HEARTBEAT)) {
 				seen.append(f);
 			}
 			assertTrue(seen.indexOf("\"connected\":false") > 0 && seen.lastIndexOf("\"connected\":true") > seen.indexOf("\"connected\":false"),
