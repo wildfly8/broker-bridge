@@ -37,13 +37,13 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 
 | Method | Path | Body → response |
 |---|---|---|
-| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms}` |
+| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt}` (`startedAt` changes only when the bridge restarts) |
 | POST | `/v1/subscriptions` | `{instrument, route, snapshot, genericTicks}` → `{subscriptionId}` · 503 disconnected |
 | DELETE | `/v1/subscriptions/{id}` | → 204 |
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
 | POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing |
 | POST | `/v1/contracts/resolve` | `{instrument}` → `{instrument, marketName, minTick, priceMagnifier, orderTypes, validExchanges}` · 404 none |
-| POST | `/v1/orders` | `{clientOrderId, route, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT, limitPrice, stopPrice, timeInForce: DAY|GTC|IOC, allOrNone, strategyCategory, modify}` → 202 · 403 disabled · 409 duplicate id · 503 disconnected |
+| POST | `/v1/orders` | `{clientOrderId, route, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, strategyCategory, modify}` → 202 · 403 disabled · 409 duplicate id · 503 disconnected |
 | DELETE | `/v1/orders/{clientOrderId}` | → 202 · 403 disabled · 404 unknown |
 | GET | `/v1/events` | `text/event-stream`: `connection`, `quote`, `snapshot-end`, `order-status`, `fill`, `error`; `: heartbeat` every 15 s |
 

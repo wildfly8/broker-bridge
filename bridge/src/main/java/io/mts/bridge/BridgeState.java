@@ -34,6 +34,7 @@ final class BridgeState {
 	final Map<Integer, OrderRef> ordersByIbId = new ConcurrentHashMap<>();
 	final Map<Long, Integer> ibIdByClientOrderId = new ConcurrentHashMap<>();
 
+	private final String startedAt = Instant.now().toString();
 	private final Map<String, Boolean> dataFarms = new ConcurrentHashMap<>();
 	private volatile boolean connected;
 	private volatile Integer serverVersion;
@@ -75,7 +76,7 @@ final class BridgeState {
 
 	ConnectionStatus status(boolean ordersEnabled) {
 		return new ConnectionStatus(connected, serverVersion, accounts, lastError, ordersEnabled, since.toString(),
-				new TreeMap<>(dataFarms));
+				new TreeMap<>(dataFarms), startedAt);
 	}
 
 	/** Collects one snapshot; completes when the wanted field arrives or at snapshot end. */

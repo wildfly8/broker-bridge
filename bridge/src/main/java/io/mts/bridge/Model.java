@@ -53,9 +53,12 @@ public final class Model {
 	public record FillEvent(Long clientOrderId, String fillId, String side, Double quantity, Double price, Double avgPrice,
 			Double cumQuantity, String exchange, String permId, Integer route, String time, Instrument instrument) {}
 
-	/** {@code dataFarms}: broker data-farm name → connected (e.g. usfarm, usopt, ushmds). */
+	/**
+	 * {@code dataFarms}: broker data-farm name → connected (e.g. usfarm, usopt, ushmds). {@code startedAt} changes
+	 * only when the bridge restarts, so a client can tell its subscriptions are gone.
+	 */
 	public record ConnectionStatus(boolean connected, Integer serverVersion, String accounts, String lastError,
-			boolean ordersEnabled, String since, Map<String, Boolean> dataFarms) {}
+			boolean ordersEnabled, String since, Map<String, Boolean> dataFarms, String startedAt) {}
 
 	public record SnapshotEnd(int subscriptionId, Integer route) {}
 

@@ -51,6 +51,16 @@ class OrdersTest {
 	}
 
 	@Test
+	void limitIfTouchedUsesTriggerAsStopPrice() {
+		Order o = Orders.toIb(order("BUY", "LIMIT_IF_TOUCHED", 500.0, 499.5, "DAY"), 1);
+		assertEquals("LIT", o.getOrderType());
+		assertEquals(500.0, o.lmtPrice());
+		assertEquals(499.5, o.auxPrice());
+		assertEquals(400, assertThrows(ApiException.class,
+				() -> Orders.toIb(order("BUY", "LIMIT_IF_TOUCHED", 500.0, null, null), 1)).status());
+	}
+
+	@Test
 	void rejectsIncompleteOrders() {
 		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(order("BUY", "LIMIT", null, null, null), 1)).status());
 		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(order("BUY", "STOP", null, null, null), 1)).status());

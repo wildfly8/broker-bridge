@@ -31,6 +31,11 @@ final class Orders {
 				o.orderType("STP");
 				o.auxPrice(required(r.stopPrice(), "stopPrice"));
 			}
+			case "LIMIT_IF_TOUCHED" -> {
+				o.orderType("LIT");
+				o.lmtPrice(required(r.limitPrice(), "limitPrice"));
+				o.auxPrice(required(r.stopPrice(), "stopPrice"));
+			}
 			case "STOP_LIMIT" -> {
 				o.orderType("STP LMT");
 				o.lmtPrice(required(r.limitPrice(), "limitPrice"));

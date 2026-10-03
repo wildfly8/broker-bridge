@@ -254,5 +254,6 @@ class IbCallbacksTest {
 		assertEquals("connection", last[0]);
 		assertFalse(json(last[1]).get("connected").asBoolean());
 		assertNotNull(json(last[1]).get("since"));
+		assertNotNull(json(last[1]).get("startedAt"));
 	}
 }
