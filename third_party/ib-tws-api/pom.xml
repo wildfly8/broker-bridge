@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
 		<groupId>io.github.wildfly8</groupId>
-		<artifactId>mts-ib-bridge-parent</artifactId>
+		<artifactId>broker-bridge-parent</artifactId>
 		<version>0.1.0-SNAPSHOT</version>
 		<relativePath>../../pom.xml</relativePath>
 	</parent>

@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,8 +10,8 @@ import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.Test;
 
-import io.mts.bridge.Model.Instrument;
-import io.mts.bridge.Model.SubscriptionRequest;
+import io.github.wildfly8.brokerbridge.Model.Instrument;
+import io.github.wildfly8.brokerbridge.Model.SubscriptionRequest;
 
 class IbConnectionTest {
 
@@ -34,8 +34,8 @@ class IbConnectionTest {
 		BrokerService broker = new BrokerService(ib, state, false);
 		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
 		callbacks.listener(conn);
-		state.subscriptions.put(42, new SubscriptionRequest(Instrument.stock("SPY", "SMART", "USD"), 1, false, "100"));
-		state.subscriptions.put(43, new SubscriptionRequest(Instrument.stock("QQQ", "SMART", "USD"), 1, true, null));
+		state.subscriptions.put(42, new SubscriptionRequest(Instrument.stock("SPY", "SMART", "USD"), "1", false, "100"));
+		state.subscriptions.put(43, new SubscriptionRequest(Instrument.stock("QQQ", "SMART", "USD"), "1", true, null));
 
 		ib.refuseConnect = true;
 		conn.start();

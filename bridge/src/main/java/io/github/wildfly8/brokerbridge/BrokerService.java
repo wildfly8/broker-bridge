@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.util.List;
 import java.util.Map;
@@ -12,15 +12,15 @@ import org.slf4j.LoggerFactory;
 
 import com.ib.client.Contract;
 
-import io.mts.bridge.BridgeState.OrderRef;
-import io.mts.bridge.Model.ConnectionStatus;
-import io.mts.bridge.Model.HistoryRequest;
-import io.mts.bridge.Model.HistoryResult;
-import io.mts.bridge.Model.InstrumentDetails;
-import io.mts.bridge.Model.OrderRequest;
-import io.mts.bridge.Model.SnapshotRequest;
-import io.mts.bridge.Model.SnapshotResult;
-import io.mts.bridge.Model.SubscriptionRequest;
+import io.github.wildfly8.brokerbridge.BridgeState.OrderRef;
+import io.github.wildfly8.brokerbridge.Model.ConnectionStatus;
+import io.github.wildfly8.brokerbridge.Model.HistoryRequest;
+import io.github.wildfly8.brokerbridge.Model.HistoryResult;
+import io.github.wildfly8.brokerbridge.Model.InstrumentDetails;
+import io.github.wildfly8.brokerbridge.Model.OrderRequest;
+import io.github.wildfly8.brokerbridge.Model.SnapshotRequest;
+import io.github.wildfly8.brokerbridge.Model.SnapshotResult;
+import io.github.wildfly8.brokerbridge.Model.SubscriptionRequest;
 
 /** The bridge API operations, on top of an {@link IbClient}. */
 final class BrokerService {
@@ -54,7 +54,7 @@ final class BrokerService {
 		boolean snapshot = Boolean.TRUE.equals(r.snapshot());
 		state.subscriptions.put(id, r);
 		client.reqMktData(id, contract, snapshot ? "" : ticks(r.genericTicks()), snapshot);
-		log.info("Subscribed {} {} route={} snapshot={}", id, r.instrument().symbol(), r.route(), snapshot);
+		log.info("Subscribed {} {} tag={} snapshot={}", id, r.instrument().symbol(), r.tag(), snapshot);
 		return id;
 	}
 
@@ -168,7 +168,7 @@ final class BrokerService {
 			}
 		}
 		com.ib.client.Order order = Orders.toIb(r, ibId);
-		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.route(), r.instrument()));
+		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.tag(), r.instrument()));
 		state.ibIdByClientOrderId.put(clientOrderId, ibId);
 		client.placeOrder(ibId, contract, order);
 		log.info("{} order {} (broker {}) {} {} {} @ {}", Boolean.TRUE.equals(r.modify()) ? "Modified" : "Placed",

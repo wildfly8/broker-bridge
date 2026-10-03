@@ -1,4 +1,4 @@
-# mts-ib-bridge on JDK 25.   docker build -t mts-ib-bridge .
+# broker-bridge on JDK 25.   docker build -t broker-bridge .
 FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /src
 ENV MAVEN_OPTS="-Xmx512m"
@@ -12,7 +12,7 @@ RUN mvn -B -q -DskipTests package
 FROM eclipse-temurin:25-jre-alpine
 RUN addgroup -S bridge && adduser -S bridge -G bridge
 WORKDIR /app
-COPY --from=build /src/bridge/target/mts-ib-bridge.jar app.jar
+COPY --from=build /src/bridge/target/broker-bridge.jar app.jar
 COPY LICENSE third_party/ib-tws-api/NOTICE ./
 USER bridge
 # Defaults: paper Gateway on localhost, API on localhost, orders refused.

@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -9,14 +9,14 @@ import org.junit.jupiter.api.Test;
 
 import com.ib.client.Order;
 
-import io.mts.bridge.Model.Instrument;
-import io.mts.bridge.Model.OrderRequest;
+import io.github.wildfly8.brokerbridge.Model.Instrument;
+import io.github.wildfly8.brokerbridge.Model.OrderRequest;
 
 class OrdersTest {
 
 	private static OrderRequest order(String side, String type, Double limit, Double stop, String tif) {
-		return new OrderRequest(7001L, 4, Instrument.stock("SPY", "SMART", "USD"), side, 100.0, type, limit, stop, tif,
-				true, "INV", null);
+		return new OrderRequest(7001L, "4", Instrument.stock("SPY", "SMART", "USD"), side, 100.0, type, limit, stop, tif,
+				true, "ref-1", null);
 	}
 
 	@Test
@@ -29,7 +29,7 @@ class OrdersTest {
 		assertEquals(500.0, o.lmtPrice());
 		assertEquals("DAY", o.getTif());
 		assertTrue(o.allOrNone());
-		assertEquals("INV", o.orderRef());
+		assertEquals("ref-1", o.orderRef());
 		assertTrue(o.transmit());
 	}
 
@@ -67,7 +67,7 @@ class OrdersTest {
 		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(order("HOLD", "MARKET", null, null, null), 1)).status());
 		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(order("BUY", "PEG", null, null, null), 1)).status());
 		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(order("BUY", "MARKET", null, null, "FOK"), 1)).status());
-		OrderRequest zero = new OrderRequest(1L, 1, Instrument.stock("SPY", "SMART", "USD"), "BUY", 0.0, "MARKET",
+		OrderRequest zero = new OrderRequest(1L, "1", Instrument.stock("SPY", "SMART", "USD"), "BUY", 0.0, "MARKET",
 				null, null, null, null, null, null);
 		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(zero, 1)).status());
 	}

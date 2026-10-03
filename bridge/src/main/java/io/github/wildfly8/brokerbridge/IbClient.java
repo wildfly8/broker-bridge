@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import com.ib.client.Contract;
 import com.ib.client.Order;

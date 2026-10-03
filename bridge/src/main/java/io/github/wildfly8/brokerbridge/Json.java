@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

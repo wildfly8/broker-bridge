@@ -1,11 +1,12 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.util.List;
 import java.util.Map;
 
 /**
- * Broker-neutral wire model (specs/007-ib-bridge/contracts/bridge-api.md in mts-cloud).
- * No IB type, enum or field layout appears here: plain names and values only.
+ * Broker-neutral wire model (API v1, see README).
+ * No IB type, enum or field layout appears here: plain names and values only. {@code tag} is an opaque string the
+ * client attaches to a subscription or order; every event that results from it carries the same tag back.
  */
 public final class Model {
 
@@ -27,12 +28,12 @@ public final class Model {
 	public record OptionValues(Double impliedVol, Double delta, Double gamma, Double theta, Double vega, Double optionPrice,
 			Double underlyingPrice) {}
 
-	public record QuoteEvent(Integer route, int subscriptionId, String field, int code, Double price, Double size,
+	public record QuoteEvent(String tag, int subscriptionId, String field, int code, Double price, Double size,
 			OptionValues option, String time) {}
 
 	public record Bar(String time, double open, double high, double low, double close, Double volume, Integer count, Double wap) {}
 
-	public record SubscriptionRequest(Instrument instrument, Integer route, Boolean snapshot, String genericTicks) {}
+	public record SubscriptionRequest(Instrument instrument, String tag, Boolean snapshot, String genericTicks) {}
 
 	public record SnapshotRequest(Instrument instrument, String field, Long timeoutMs) {}
 
@@ -43,15 +44,15 @@ public final class Model {
 
 	public record HistoryResult(List<Bar> bars) {}
 
-	public record OrderRequest(Long clientOrderId, Integer route, Instrument instrument, String side, Double quantity,
+	public record OrderRequest(Long clientOrderId, String tag, Instrument instrument, String side, Double quantity,
 			String type, Double limitPrice, Double stopPrice, String timeInForce, Boolean allOrNone,
-			String strategyCategory, Boolean modify) {}
+			String orderRef, Boolean modify) {}
 
 	public record OrderStatusEvent(Long clientOrderId, String status, Double filled, Double remaining, Double avgFillPrice,
-			Double lastFillPrice, String permId, String parentId, Integer route, String whyHeld) {}
+			Double lastFillPrice, String permId, String parentId, String tag, String whyHeld) {}
 
 	public record FillEvent(Long clientOrderId, String fillId, String side, Double quantity, Double price, Double avgPrice,
-			Double cumQuantity, String exchange, String permId, Integer route, String time, Instrument instrument) {}
+			Double cumQuantity, String exchange, String permId, String tag, String time, Instrument instrument) {}
 
 	/**
 	 * {@code dataFarms}: broker data-farm name → connected (e.g. usfarm, usopt, ushmds). {@code startedAt} changes
@@ -60,7 +61,7 @@ public final class Model {
 	public record ConnectionStatus(boolean connected, Integer serverVersion, String accounts, String lastError,
 			boolean ordersEnabled, String since, Map<String, Boolean> dataFarms, String startedAt) {}
 
-	public record SnapshotEnd(int subscriptionId, Integer route) {}
+	public record SnapshotEnd(int subscriptionId, String tag) {}
 
 	/** {@code clientOrderId} is set when the error belongs to an order, {@code requestId} otherwise. */
 	public record ErrorEvent(Integer requestId, Long clientOrderId, int code, String message, boolean retryable) {}

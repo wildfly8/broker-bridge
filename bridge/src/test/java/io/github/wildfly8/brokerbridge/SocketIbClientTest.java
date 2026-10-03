@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,7 +19,7 @@ import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.Test;
 
-import io.mts.bridge.Model.Instrument;
+import io.github.wildfly8.brokerbridge.Model.Instrument;
 
 /** The real IB client against a minimal fake Gateway speaking the v100+ handshake (text messages). */
 class SocketIbClientTest {

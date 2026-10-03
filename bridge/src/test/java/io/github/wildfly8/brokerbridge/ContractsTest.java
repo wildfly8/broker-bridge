@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -12,9 +12,9 @@ import com.ib.client.ComboLeg;
 import com.ib.client.Contract;
 import com.ib.client.ContractDetails;
 
-import io.mts.bridge.Model.Instrument;
-import io.mts.bridge.Model.InstrumentDetails;
-import io.mts.bridge.Model.Leg;
+import io.github.wildfly8.brokerbridge.Model.Instrument;
+import io.github.wildfly8.brokerbridge.Model.InstrumentDetails;
+import io.github.wildfly8.brokerbridge.Model.Leg;
 
 class ContractsTest {
 

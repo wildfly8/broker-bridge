@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;

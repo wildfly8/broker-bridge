@@ -3,11 +3,11 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>io.github.wildfly8</groupId>
-	<artifactId>mts-ib-bridge-parent</artifactId>
+	<artifactId>broker-bridge-parent</artifactId>
 	<version>0.1.0-SNAPSHOT</version>
 	<packaging>pom</packaging>
-	<name>mts-ib-bridge</name>
-	<description>Broker-neutral localhost bridge to Interactive Brokers TWS / IB Gateway (GPLv3)</description>
+	<name>broker-bridge</name>
+	<description>Unofficial, broker-neutral localhost HTTP + SSE bridge for the Interactive Brokers TWS API (GPLv3)</description>
 	<licenses>
 		<license>
 			<name>GNU General Public License v3.0</name>

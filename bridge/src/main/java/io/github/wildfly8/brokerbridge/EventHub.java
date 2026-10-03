@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;

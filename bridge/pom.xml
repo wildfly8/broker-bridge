@@ -4,11 +4,11 @@
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
 		<groupId>io.github.wildfly8</groupId>
-		<artifactId>mts-ib-bridge-parent</artifactId>
+		<artifactId>broker-bridge-parent</artifactId>
 		<version>0.1.0-SNAPSHOT</version>
 	</parent>
-	<artifactId>mts-ib-bridge</artifactId>
-	<name>mts-ib-bridge (server)</name>
+	<artifactId>broker-bridge</artifactId>
+	<name>broker-bridge (server)</name>
 	<dependencies>
 		<dependency>
 			<groupId>io.github.wildfly8</groupId>
@@ -38,7 +38,7 @@
 		</dependency>
 	</dependencies>
 	<build>
-		<finalName>mts-ib-bridge</finalName>
+		<finalName>broker-bridge</finalName>
 		<plugins>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -53,7 +53,7 @@
 							<createDependencyReducedPom>false</createDependencyReducedPom>
 							<transformers>
 								<transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-									<mainClass>io.mts.bridge.BridgeMain</mainClass>
+									<mainClass>io.github.wildfly8.brokerbridge.BridgeMain</mainClass>
 								</transformer>
 								<transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
 							</transformers>

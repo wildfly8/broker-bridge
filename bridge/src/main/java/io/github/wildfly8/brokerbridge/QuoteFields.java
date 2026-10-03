@@ -1,10 +1,10 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.util.Map;
 
 /**
- * Neutral quote field names for the numeric field codes MTS uses. Delayed-data codes are folded into their
- * live equivalents so MTS sees the same field whatever the market data type.
+ * Quote field names for the broker's numeric field codes (IB tick types). Delayed-data codes are folded into
+ * their live equivalents so clients see the same field whatever the market data type.
  */
 final class QuoteFields {
 

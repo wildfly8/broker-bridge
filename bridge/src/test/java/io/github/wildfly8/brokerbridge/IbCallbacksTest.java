@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,8 +21,8 @@ import com.ib.client.Decimal;
 import com.ib.client.Execution;
 import com.ib.client.TickAttrib;
 
-import io.mts.bridge.Model.Instrument;
-import io.mts.bridge.Model.SubscriptionRequest;
+import io.github.wildfly8.brokerbridge.Model.Instrument;
+import io.github.wildfly8.brokerbridge.Model.SubscriptionRequest;
 
 class IbCallbacksTest {
 
@@ -37,7 +37,7 @@ class IbCallbacksTest {
 		hub = new EventHub();
 		events = hub.register();
 		callbacks = new IbCallbacks(state, hub, false);
-		state.subscriptions.put(42, new SubscriptionRequest(Instrument.stock("SPY", "SMART", "USD"), 3, false, null));
+		state.subscriptions.put(42, new SubscriptionRequest(Instrument.stock("SPY", "SMART", "USD"), "3", false, null));
 	}
 
 	/** Drains published events as (name, data) pairs. */
@@ -56,7 +56,7 @@ class IbCallbacksTest {
 	}
 
 	@Test
-	void quotesCarryRouteFieldAndCode() throws Exception {
+	void quotesCarryTagFieldAndCode() throws Exception {
 		callbacks.tickPrice(42, 1, 501.25, new TickAttrib());
 		callbacks.tickSize(42, 3, Decimal.get(BigDecimal.valueOf(200)));
 		callbacks.tickPrice(42, 68, 501.30, new TickAttrib()); // delayed last → LAST
@@ -65,7 +65,7 @@ class IbCallbacksTest {
 		assertEquals(3, ev.size());
 		JsonNode bid = json(ev.get(0)[1]);
 		assertEquals("quote", ev.get(0)[0]);
-		assertEquals(3, bid.get("route").asInt());
+		assertEquals("3", bid.get("tag").asText());
 		assertEquals(42, bid.get("subscriptionId").asInt());
 		assertEquals("BID", bid.get("field").asText());
 		assertEquals(1, bid.get("code").asInt());
@@ -128,11 +128,11 @@ class IbCallbacksTest {
 
 	@Test
 	void snapshotSubscriptionEndsWithEvent() throws Exception {
-		state.subscriptions.put(60, new SubscriptionRequest(Instrument.stock("QQQ", "SMART", "USD"), 5, true, null));
+		state.subscriptions.put(60, new SubscriptionRequest(Instrument.stock("QQQ", "SMART", "USD"), "5", true, null));
 		callbacks.tickSnapshotEnd(60);
 		List<String[]> ev = drain();
 		assertEquals("snapshot-end", ev.get(0)[0]);
-		assertEquals(5, json(ev.get(0)[1]).get("route").asInt());
+		assertEquals("5", json(ev.get(0)[1]).get("tag").asText());
 		assertFalse(state.subscriptions.containsKey(60));
 	}
 
@@ -191,10 +191,10 @@ class IbCallbacksTest {
 
 	@Test
 	void ordersStatusAndFillsUseClientOrderId() throws Exception {
-		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, 4, Instrument.stock("SPY", "SMART", "USD")));
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
 		callbacks.orderStatus(7, "Filled", Decimal.get(BigDecimal.valueOf(100)), Decimal.ZERO, 500.1, 99L, 0, 500.1, 11, null, 0);
 		Execution e = new Execution(7, 11, "0001.01", "20261002 10:00:00 US/Eastern", "DU1234567", "ARCA", "BOT",
-				Decimal.get(BigDecimal.valueOf(100)), 500.1, 99L, 0, Decimal.get(BigDecimal.valueOf(100)), 500.1, "INV",
+				Decimal.get(BigDecimal.valueOf(100)), 500.1, 99L, 0, Decimal.get(BigDecimal.valueOf(100)), 500.1, "ref-1",
 				"", 0, "", null, false, null, null);
 		callbacks.execDetails(-1, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), e);
 		callbacks.orderStatus(8, "Submitted", Decimal.ZERO, Decimal.ZERO, 0, 0, 0, 0, 11, null, 0); // not ours
@@ -206,7 +206,7 @@ class IbCallbacksTest {
 		assertEquals(7001, status.get("clientOrderId").asLong());
 		assertEquals("Filled", status.get("status").asText());
 		assertEquals(100.0, status.get("filled").asDouble());
-		assertEquals(4, status.get("route").asInt());
+		assertEquals("4", status.get("tag").asText());
 		assertNull(status.get("parentId"));
 		JsonNode fill = json(ev.get(1)[1]);
 		assertEquals("fill", ev.get(1)[0]);

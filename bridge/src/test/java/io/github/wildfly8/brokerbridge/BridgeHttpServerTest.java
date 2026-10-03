@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -83,7 +83,7 @@ class BridgeHttpServerTest {
 	void subscribeAndUnsubscribe() throws Exception {
 		start(false, true);
 		HttpResponse<String> r = send("POST", "/v1/subscriptions",
-				"{\"instrument\":" + SPY + ",\"route\":2,\"genericTicks\":\"100,101,105\"}");
+				"{\"instrument\":" + SPY + ",\"tag\":\"2\",\"genericTicks\":\"100,101,105\"}");
 		assertEquals(200, r.statusCode(), r.body());
 		int id = json(r).get("subscriptionId").asInt();
 		assertTrue(ib.calls.contains("mktData " + id + " SPY [100,101,105] false"), ib.calls.toString());
@@ -163,7 +163,7 @@ class BridgeHttpServerTest {
 	}
 
 	private static String order(long clientOrderId, boolean modify) {
-		return "{\"clientOrderId\":" + clientOrderId + ",\"route\":4,\"instrument\":" + SPY
+		return "{\"clientOrderId\":" + clientOrderId + ",\"tag\":\"4\",\"instrument\":" + SPY
 				+ ",\"side\":\"BUY\",\"quantity\":100,\"type\":\"LIMIT\",\"limitPrice\":500.0,\"timeInForce\":\"DAY\""
 				+ (modify ? ",\"modify\":true" : "") + "}";
 	}
@@ -222,7 +222,7 @@ class BridgeHttpServerTest {
 			assertTrue(in.readLine().contains("\"connected\":true"));
 			assertEquals("", in.readLine());
 			waitFor(() -> hub.clientCount() == 1);
-			state.subscriptions.put(42, new Model.SubscriptionRequest(Model.Instrument.stock("SPY", "SMART", "USD"), 1, false, null));
+			state.subscriptions.put(42, new Model.SubscriptionRequest(Model.Instrument.stock("SPY", "SMART", "USD"), "1", false, null));
 			callbacks.tickPrice(42, 4, 501.0, new TickAttrib());
 			assertEquals("event: quote", in.readLine());
 			assertTrue(in.readLine().contains("\"field\":\"LAST\""));

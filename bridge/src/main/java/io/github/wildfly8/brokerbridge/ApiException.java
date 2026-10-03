@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 /** A request the bridge refuses or can't complete; carries the HTTP status to return. */
 public class ApiException extends RuntimeException {

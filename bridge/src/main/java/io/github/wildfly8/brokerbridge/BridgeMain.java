@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.net.InetAddress;
 import java.time.Duration;
@@ -7,7 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * mts-ib-bridge: a separate GPLv3 program that talks to IB Gateway/TWS with IB's official client and offers a
+ * broker-bridge: a separate GPLv3 program that talks to IB Gateway/TWS with IB's official client and offers a
  * broker-neutral HTTP + SSE API on localhost.
  */
 public final class BridgeMain {
@@ -39,13 +39,13 @@ public final class BridgeMain {
 		callbacks.listener(connection);
 		BridgeHttpServer server = new BridgeHttpServer(config.bind(), config.port(), broker, hub, 15_000);
 
-		log.info("mts-ib-bridge starting: IB {}:{} client {}, orders {}, market data type {}", config.ibHost(),
+		log.info("broker-bridge starting: IB {}:{} client {}, orders {}, market data type {}", config.ibHost(),
 				config.ibPort(), config.ibClientId(), config.ordersEnabled() ? "ENABLED" : "disabled",
 				config.marketDataType());
 		server.start();
 		connection.start();
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-			log.info("mts-ib-bridge stopping");
+			log.info("broker-bridge stopping");
 			connection.stop();
 			server.stop();
 		}, "shutdown"));

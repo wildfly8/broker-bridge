@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -15,13 +15,13 @@ import com.fasterxml.jackson.core.JacksonException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-import io.mts.bridge.Model.HistoryRequest;
-import io.mts.bridge.Model.OrderAccepted;
-import io.mts.bridge.Model.OrderRequest;
-import io.mts.bridge.Model.ResolveRequest;
-import io.mts.bridge.Model.SnapshotRequest;
-import io.mts.bridge.Model.SubscriptionId;
-import io.mts.bridge.Model.SubscriptionRequest;
+import io.github.wildfly8.brokerbridge.Model.HistoryRequest;
+import io.github.wildfly8.brokerbridge.Model.OrderAccepted;
+import io.github.wildfly8.brokerbridge.Model.OrderRequest;
+import io.github.wildfly8.brokerbridge.Model.ResolveRequest;
+import io.github.wildfly8.brokerbridge.Model.SnapshotRequest;
+import io.github.wildfly8.brokerbridge.Model.SubscriptionId;
+import io.github.wildfly8.brokerbridge.Model.SubscriptionRequest;
 
 /** Bridge API v1 over the JDK HTTP server; every request runs on its own virtual thread. */
 final class BridgeHttpServer {

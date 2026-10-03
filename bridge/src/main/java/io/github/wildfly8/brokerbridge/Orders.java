@@ -1,11 +1,11 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import java.math.BigDecimal;
 
 import com.ib.client.Decimal;
 import com.ib.client.Order;
 
-import io.mts.bridge.Model.OrderRequest;
+import io.github.wildfly8.brokerbridge.Model.OrderRequest;
 
 /** Neutral {@link OrderRequest} → IB {@link Order}. */
 final class Orders {
@@ -49,7 +49,7 @@ final class Orders {
 		}
 		o.tif(tif);
 		o.allOrNone(Boolean.TRUE.equals(r.allOrNone()));
-		o.orderRef(r.strategyCategory());
+		o.orderRef(r.orderRef());
 		o.transmit(true);
 		return o;
 	}

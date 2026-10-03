@@ -1,4 +1,4 @@
-package io.mts.bridge;
+package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.Test;
 
-import io.mts.bridge.Model.Instrument;
-import io.mts.bridge.Model.SubscriptionRequest;
+import io.github.wildfly8.brokerbridge.Model.Instrument;
+import io.github.wildfly8.brokerbridge.Model.SubscriptionRequest;
 
 class JsonTest {
 
@@ -25,9 +25,9 @@ class JsonTest {
 		String json = Json.write(Instrument.stock("SPY", "SMART", "USD"));
 		assertFalse(json.contains("null"));
 		SubscriptionRequest r = Json.MAPPER.readValue(
-				"{\"instrument\":{\"symbol\":\"SPY\",\"type\":\"STOCK\",\"extra\":1},\"route\":2,\"future\":true}",
+				"{\"instrument\":{\"symbol\":\"SPY\",\"type\":\"STOCK\",\"extra\":1},\"tag\":\"2\",\"future\":true}",
 				SubscriptionRequest.class);
 		assertEquals("SPY", r.instrument().symbol());
-		assertEquals(2, r.route());
+		assertEquals("2", r.tag());
 	}
 }
