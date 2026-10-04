@@ -77,6 +77,12 @@ of its components should get the data). Every quote, snapshot-end, order-status 
 event that results from it carries the same `tag`. `orderRef` is passed to the broker as
 the order reference.
 
+**Compatibility**: API v1 only grows by adding optional fields and new event types. Clients
+must ignore fields and event types they don't know; the bridge ignores unknown request fields.
+A future optional `venue` field (which broker or exchange account an instrument, order or
+event belongs to) will default to the only configured venue, IB, when absent, so v1 clients
+keep working. Removing or renaming a field, or changing its meaning, needs `/v2`.
+
 ## Behaviour
 
 - One IB session (client id `IB_CLIENT_ID`). On disconnect (e.g. Gateway's daily restart) it retries every 5 s,
