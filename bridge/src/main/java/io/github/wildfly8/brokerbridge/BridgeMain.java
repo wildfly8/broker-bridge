@@ -13,6 +13,14 @@ import org.slf4j.LoggerFactory;
  */
 public final class BridgeMain {
 
+	static {
+		// must run before the first logger is created (slf4j-simple reads system properties once)
+		String level = System.getenv("LOG_LEVEL");
+		if (level != null && !level.isBlank() && System.getProperty("org.slf4j.simpleLogger.defaultLogLevel") == null) {
+			System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", level.trim().toLowerCase());
+		}
+	}
+
 	private static final Logger log = LoggerFactory.getLogger(BridgeMain.class);
 
 	private BridgeMain() {}

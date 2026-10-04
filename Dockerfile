@@ -24,4 +24,6 @@ VOLUME /data
 EXPOSE 8090
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s \
   CMD wget -qO- "http://127.0.0.1:${BRIDGE_PORT}/v1/status" >/dev/null || exit 1
-ENTRYPOINT ["java", "-Xmx128m", "-XX:+UseSerialGC", "-jar", "app.jar"]
+# Dynamic class-data sharing: the first start writes the archive to /data, later starts reuse it.
+ENTRYPOINT ["java", "-Xmx128m", "-XX:+UseSerialGC", \
+  "-XX:+AutoCreateSharedArchive", "-XX:SharedArchiveFile=/data/broker-bridge.jsa", "-jar", "app.jar"]

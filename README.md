@@ -36,7 +36,7 @@ docker run --rm --network host broker-bridge
 | `BRIDGE_ORDERS_ENABLED` | `false` | only `true` lets orders through |
 | `BRIDGE_DATA_DIR` | unset (image: `/data`) | journal of order events and order ids, so replay survives a restart |
 | `BRIDGE_REPLAY_MAX` | `100000` | order events kept for replay |
-| `LOG_LEVEL` | `INFO` | |
+| `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn` or `error` (logging is `slf4j-simple`) |
 
 ## API v1
 
