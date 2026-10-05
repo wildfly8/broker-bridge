@@ -1,0 +1,49 @@
+# Build and test broker-bridge, and check that its image builds, starts, answers and refuses orders by default.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Build and test (the IB TWS API client in third_party is vendored and unchanged)
+        run: mvn -B verify
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t broker-bridge:ci .
+      - name: The container starts, answers /v1/status and refuses orders by default
+        run: |
+          cid=$(docker run -d -p 127.0.0.1:8090:8090 -e BRIDGE_BIND=0.0.0.0 broker-bridge:ci)
+          status=
+          for i in $(seq 1 40); do
+            status=$(curl -fsS http://127.0.0.1:8090/v1/status) && break
+            sleep 1
+          done
+          docker logs "$cid" | tail -n 20
+          echo "status: $status"
+          docker stop "$cid" > /dev/null
+          echo "$status" | grep -q '"ordersEnabled":false'

@@ -27,13 +27,16 @@ docker build -t broker-bridge .              # or as a container
 docker run --rm --network host broker-bridge
 ```
 
+GitHub Actions (`.github/workflows/ci.yml`) builds and tests on every push and pull request (`mvn -B verify`, 48 tests) and
+then builds the image, starts it without a Gateway and checks that `/v1/status` answers with orders refused.
+
 | Variable | Default | |
 |---|---|---|
 | `IB_HOST` / `IB_PORT` | `127.0.0.1` / `4002` | Gateway API socket (4002 paper, 4001 live) |
 | `IB_CLIENT_ID` | `11` | API client id |
 | `IB_MARKET_DATA_TYPE` | `1` | 1 live, 2 frozen, 3 delayed, 4 delayed-frozen |
 | `BRIDGE_BIND` / `BRIDGE_PORT` | `127.0.0.1` / `8090` | API listen address; the API has **no authentication** |
-| `BRIDGE_ORDERS_ENABLED` | `false` | only `true` lets orders through |
+| `BRIDGE_ORDERS_ENABLED` | `false` | only `true` (any case) lets orders through; `1` and `yes` do not |
 | `BRIDGE_DATA_DIR` | unset (image: `/data`) | journal of order events and order ids, so replay survives a restart |
 | `BRIDGE_REPLAY_MAX` | `100000` | order events kept for replay |
 | `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn` or `error` (logging is `slf4j-simple`) |
