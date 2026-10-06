@@ -12,11 +12,10 @@ calling program.
 
 ## Broker support
 
-| | |
-|---|---|
-| Implemented today | **Interactive Brokers** (TWS / IB Gateway), through IB's official Java client |
-| Configured venues | one |
-| Reserved for more | the optional `venue` field of API v1 (see Compatibility) |
+| Broker | Status | How |
+|---|---|---|
+| **Interactive Brokers** | implemented, the only one today | IB's official Java client (TWS API 10.50.02) against a logged-in TWS or IB Gateway |
+| anything else | not implemented | API v1 reserves an optional `venue` field, which defaults to IB (see Compatibility) |
 
 The API is broker-neutral; this program is not broker-agnostic. Six classes compile
 against IB's client (`BrokerService`, `Orders`, `Contracts`, `IbCallbacks`, `IbClient`,
