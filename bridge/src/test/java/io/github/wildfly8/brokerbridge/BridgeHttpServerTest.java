@@ -141,6 +141,17 @@ class BridgeHttpServerTest {
 	}
 
 	@Test
+	void historyPacingNamesItsWait() throws Exception {
+		start(false, true);
+		ib.onHistory = (id, c) -> callbacks.error(id, 0L, 162,
+				"Historical data request pacing violation, wait 15 seconds", null);
+		HttpResponse<String> r = send("POST", "/v1/history", "{\"instrument\":" + SPY + "}");
+		assertEquals(429, r.statusCode(), r.body());
+		assertTrue(json(r).get("retryable").asBoolean());
+		assertEquals("15", r.headers().firstValue("Retry-After").orElse(""));
+	}
+
+	@Test
 	void resolveFoundAndNotFound() throws Exception {
 		start(false, true);
 		ib.onDetails = (id, c) -> {

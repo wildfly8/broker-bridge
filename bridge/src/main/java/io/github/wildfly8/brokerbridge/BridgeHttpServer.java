@@ -77,6 +77,9 @@ final class BridgeHttpServer {
 			try {
 				h.handle(ex);
 			} catch (ApiException e) {
+				if (e.retryAfterSeconds() != null) {
+					ex.getResponseHeaders().set("Retry-After", Integer.toString(e.retryAfterSeconds()));
+				}
 				reply(ex, e.status(), e.retryable() ? Map.of("error", e.getMessage(), "retryable", true)
 						: Map.of("error", e.getMessage()));
 			} catch (JacksonException e) {

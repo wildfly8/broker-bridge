@@ -185,6 +185,13 @@ class IbCallbacksTest {
 		ApiException pacing = (ApiException) org.junit.jupiter.api.Assertions.assertThrows(ExecutionException.class, p.done::get).getCause();
 		assertEquals(429, pacing.status());
 		assertTrue(pacing.retryable());
+		assertEquals(null, pacing.retryAfterSeconds());
+
+		BridgeState.History w = new BridgeState.History();
+		state.histories.put(92, w);
+		callbacks.error(92, 0L, 162, "Historical data request pacing violation, wait 15 seconds", null);
+		ApiException waited = (ApiException) org.junit.jupiter.api.Assertions.assertThrows(ExecutionException.class, w.done::get).getCause();
+		assertEquals(15, waited.retryAfterSeconds());
 		List<String[]> ev = drain();
 		assertEquals("error", ev.get(1)[0]);
 		assertTrue(json(ev.get(1)[1]).get("retryable").asBoolean());

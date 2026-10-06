@@ -44,7 +44,7 @@ docker build -t broker-bridge .              # or as a container
 docker run --rm --network host broker-bridge
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) builds and tests on every push and pull request (`mvn -B verify`, 48 tests) and
+GitHub Actions (`.github/workflows/ci.yml`) builds and tests on every push and pull request (`mvn -B verify`, 49 tests) and
 then builds the image, starts it without a Gateway and checks that `/v1/status` answers with orders refused.
 
 Bridge settings, independent of the broker:
@@ -76,7 +76,7 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 | POST | `/v1/subscriptions` | `{instrument, tag, snapshot, genericTicks}` → `{subscriptionId}` · 503 disconnected |
 | DELETE | `/v1/subscriptions/{id}` | → 204 |
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
-| POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing |
+| POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing, with `Retry-After` when the broker named a wait |
 | POST | `/v1/contracts/resolve` | `{instrument}` → `{instrument, marketName, minTick, priceMagnifier, orderTypes, validExchanges}` · 404 none |
 | POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 · 403 disabled · 409 duplicate id · 503 disconnected |
 | DELETE | `/v1/orders/{clientOrderId}` | → 202 · 403 disabled · 404 unknown |

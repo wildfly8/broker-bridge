@@ -294,7 +294,8 @@ class IbCallbacks extends DefaultEWrapper {
 
 	private static ApiException failure(int code, String text, boolean retryable) {
 		int status = retryable ? 429 : code == NO_SECURITY ? 404 : 502;
-		return new ApiException(status, "broker error " + code + ": " + text, retryable);
+		return new ApiException(status, "broker error " + code + ": " + text, retryable,
+				retryable ? ApiException.retryAfterSeconds(text) : null);
 	}
 
 	private void failPending(ApiException e) {
