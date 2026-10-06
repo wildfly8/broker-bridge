@@ -1,16 +1,34 @@
 # broker-bridge
 
-An unofficial, broker-neutral **HTTP + Server-Sent Events API on localhost** for
-Interactive Brokers' TWS / IB Gateway. It connects to a logged-in Gateway with
-IB's official Java client (TWS API 10.50.02) and exposes quotes, snapshots,
-historical bars, contract lookup, orders, order status and fills as plain JSON.
+A **broker-neutral HTTP + Server-Sent Events API on localhost** for trading programs.
+It exposes quotes, snapshots, historical bars, contract lookup, orders, order status
+and fills as plain JSON, in broker-neutral terms: `instrument`, `side`, `LIMIT`,
+`fillId`, `brokerId`.
 
-Any program in any language can use it over a socket, without linking IB's
-client or knowing its message formats.
+Any program in any language can use it over a socket. A client never links a broker's
+client library, never compiles against one and never learns its message formats — that
+is the point of the bridge, and it is what keeps a broker's licence terms off the
+calling program.
+
+## Broker support
+
+| | |
+|---|---|
+| Implemented today | **Interactive Brokers** (TWS / IB Gateway), through IB's official Java client |
+| Configured venues | one |
+| Reserved for more | the optional `venue` field of API v1 (see Compatibility) |
+
+The API is broker-neutral; this program is not broker-agnostic. Six classes compile
+against IB's client (`BrokerService`, `Orders`, `Contracts`, `IbCallbacks`, `IbClient`,
+`SocketIbClient`), so IB types reach into the service layer, not just an edge adapter.
+Adding a second broker means a second implementation under the same v1 wire API, not a
+configuration switch. Nothing IB-specific crosses the API: no IB class name, enum or
+message layout appears in a request, a response or an event.
 
 - **Licence**: GNU GPL v3 or later (see `LICENSE`). IB's client, included unmodified in
-  `third_party/ib-tws-api`, is GPLv3.
-- **Runtime**: JDK 25; HTTP requests and IB message dispatch run on virtual threads.
+  `third_party/ib-tws-api`, is GPLv3, which is why it lives in this separate program
+  rather than inside any caller.
+- **Runtime**: JDK 25; HTTP requests and broker message dispatch run on virtual threads.
 - **Safety**: binds to `127.0.0.1`; order placement is **refused** unless `BRIDGE_ORDERS_ENABLED=true`.
 - Not affiliated with or endorsed by Interactive Brokers. "Interactive Brokers", "IBKR",
   "TWS" and "IB Gateway" are trademarks of their owners, used here only to say what this
@@ -30,16 +48,24 @@ docker run --rm --network host broker-bridge
 GitHub Actions (`.github/workflows/ci.yml`) builds and tests on every push and pull request (`mvn -B verify`, 48 tests) and
 then builds the image, starts it without a Gateway and checks that `/v1/status` answers with orders refused.
 
+Bridge settings, independent of the broker:
+
 | Variable | Default | |
 |---|---|---|
-| `IB_HOST` / `IB_PORT` | `127.0.0.1` / `4002` | Gateway API socket (4002 paper, 4001 live) |
-| `IB_CLIENT_ID` | `11` | API client id |
-| `IB_MARKET_DATA_TYPE` | `1` | 1 live, 2 frozen, 3 delayed, 4 delayed-frozen |
 | `BRIDGE_BIND` / `BRIDGE_PORT` | `127.0.0.1` / `8090` | API listen address; the API has **no authentication** |
 | `BRIDGE_ORDERS_ENABLED` | `false` | only `true` (any case) lets orders through; `1` and `yes` do not |
 | `BRIDGE_DATA_DIR` | unset (image: `/data`) | journal of order events and order ids, so replay survives a restart |
 | `BRIDGE_REPLAY_MAX` | `100000` | order events kept for replay |
 | `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn` or `error` (logging is `slf4j-simple`) |
+
+Settings of the IB adapter. They keep their `IB_` names because they configure IB's own
+client and nothing else reads them:
+
+| Variable | Default | |
+|---|---|---|
+| `IB_HOST` / `IB_PORT` | `127.0.0.1` / `4002` | Gateway API socket (4002 paper, 4001 live) |
+| `IB_CLIENT_ID` | `11` | API client id |
+| `IB_MARKET_DATA_TYPE` | `1` | 1 live, 2 frozen, 3 delayed, 4 delayed-frozen |
 
 ## API v1
 
@@ -61,7 +87,8 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 expiry, right: CALL|PUT, strike, multiplier, brokerId, legs: [{brokerId, ratio, side, exchange}]}`.
 
 **Quote event**: `{tag, subscriptionId, field, code, price, size, option: {impliedVol, delta, gamma, theta, vega,
-optionPrice, underlyingPrice}, time}`. `code` is the broker's numeric field code (IB tick type) (0 bid size, 1 bid, 2 ask, 3 ask size,
+optionPrice, underlyingPrice}, time}`. `code` is the broker's own numeric field code (with the IB adapter, an IB tick
+type) (0 bid size, 1 bid, 2 ask, 3 ask size,
 4 last, 5 last size, 6 high, 7 low, 8 volume, 9 close, 10–13 option computations, 14 open, 45 last timestamp);
 delayed-data codes are reported as their live equivalents.
 
@@ -71,8 +98,8 @@ are kept and, with `BRIDGE_DATA_DIR`, journaled to disk (fsync per event). Recon
 standard `Last-Event-ID: <id>` header (or `/v1/events?lastEventId=<id>`) to get every kept order
 event after that id, in order, followed by live events, with no gap or repeat in between. Quotes
 are not replayed. If the id is older than what was kept you first get
-`event: replay-truncated` `{after, oldestKept}`. On every IB connection the bridge also asks IB
-for the day's executions, so fills made while it was down are sent too. Fills are unique by
+`event: replay-truncated` `{after, oldestKept}`. On every broker connection the bridge also asks
+the broker for the day's executions, so fills made while it was down are sent too. Fills are unique by
 `fillId`; delivery is at-least-once, so clients should ignore a `fillId` they already have.
 
 **Tags**: `tag` is any string the client chooses for a subscription or order (e.g. which
@@ -88,10 +115,10 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
 
 ## Behaviour
 
-- One IB session (client id `IB_CLIENT_ID`). On disconnect (e.g. Gateway's daily restart) it retries every 5 s,
-  doubling up to 120 s, then re-sends active streaming subscriptions. Pending snapshot/history/resolve requests
-  fail with 503 when the session drops.
-- Order ids: the caller's `clientOrderId` is mapped to IB's order id inside the bridge; status, fills and order
+- One broker session (with the IB adapter: client id `IB_CLIENT_ID`). On disconnect (e.g. the Gateway's daily restart)
+  it retries every 5 s, doubling up to 120 s, then re-sends active streaming subscriptions. Pending
+  snapshot/history/resolve requests fail with 503 when the session drops.
+- Order ids: the caller's `clientOrderId` is mapped to the broker's order id inside the bridge; status, fills and order
   errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
   earlier orders still arrive after a bridge restart.
 - Account ids are masked in logs, status and events (`DU*****67`).
@@ -102,5 +129,9 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
 pom.xml                    parent (JDK 25)
 third_party/ib-tws-api/    IB's client, unmodified (see its README for source and checksum)
 bridge/                    the bridge (io.github.wildfly8.brokerbridge)
+                           no IB import:  BridgeHttpServer, Model, Json, EventHub, EventLog, BridgeState,
+                                          BridgeConfig, BridgeMain, ApiException, IbConnection (reconnect loop),
+                                          QuoteFields (the numeric codes are IB tick types)
+                           uses IB's client: BrokerService, Orders, Contracts, IbCallbacks, IbClient, SocketIbClient
 Dockerfile                 eclipse-temurin 25 JRE image
 ```
