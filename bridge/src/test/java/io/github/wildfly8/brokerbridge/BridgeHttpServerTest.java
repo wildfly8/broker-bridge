@@ -232,6 +232,9 @@ class BridgeHttpServerTest {
 			assertEquals("event: connection", in.readLine());
 			assertTrue(in.readLine().contains("\"connected\":true"));
 			assertEquals("", in.readLine());
+			assertEquals("event: replay-complete", in.readLine());
+			assertTrue(in.readLine().contains("\"replayed\":0"), "an empty replay still ends");
+			assertEquals("", in.readLine());
 			waitFor(() -> hub.clientCount() == 1);
 			state.subscriptions.put(42, new Model.SubscriptionRequest(Model.Instrument.stock("SPY", "SMART", "USD"), "1", false, null));
 			callbacks.tickPrice(42, 4, 501.0, new TickAttrib());
@@ -301,6 +304,8 @@ class BridgeHttpServerTest {
 			waitFor(() -> hub.clientCount() == 1);
 			orderStatus("Cancelled");
 			java.util.List<String[]> live = readUntil(in, "order-status", 1);
+			assertEquals("replay-complete", live.get(0)[1], "the replay ends before live events");
+			assertTrue(live.get(0)[2].contains("\"replayed\":2"));
 			String[] last = live.get(live.size() - 1);
 			assertTrue(last[2].contains("Cancelled"));
 			assertTrue(Long.parseLong(last[0]) > kept.get(2).id(), "ids keep increasing; nothing repeated at the seam");

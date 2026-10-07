@@ -166,7 +166,11 @@ final class BridgeHttpServer {
 					write(out, EventHub.frame(e.id(), e.event(), e.json()));
 					replayedUpTo = e.id();
 				}
+				write(out, EventHub.frame(0, "replay-complete",
+						Json.write(Map.of("replayed", replay.size(), "after", after))));
 				log.info("Event-stream client resumed after {}: replayed {} order events", after, replay.size());
+			} else {
+				write(out, EventHub.frame(0, "replay-complete", Json.write(Map.of("replayed", 0))));
 			}
 			log.info("Event-stream client connected ({} total)", hub.clientCount());
 			EventHub.Frame frame;
