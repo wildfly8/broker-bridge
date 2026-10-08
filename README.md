@@ -117,8 +117,9 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
 ## Behaviour
 
 - One broker session (with the IB adapter: client id `IB_CLIENT_ID`). On disconnect (e.g. the Gateway's daily restart)
-  it retries every 5 s, doubling up to 120 s, then re-sends active streaming subscriptions. Pending
-  snapshot/history/resolve requests fail with 503 when the session drops.
+  it retries every 5 s, doubling up to 120 s, then re-sends active streaming subscriptions. A handshake the Gateway
+  accepts and then drops (error 502 while it is restarting) waits that same backoff and does not connect again
+  immediately. Pending snapshot/history/resolve requests fail with 503 when the session drops.
 - Order ids: the caller's `clientOrderId` is mapped to the broker's order id inside the bridge; status, fills and order
   errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
   earlier orders still arrive after a bridge restart.

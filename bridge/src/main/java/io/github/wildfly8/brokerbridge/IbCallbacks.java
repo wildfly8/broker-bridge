@@ -237,6 +237,16 @@ class IbCallbacks extends DefaultEWrapper {
 			return;
 		}
 		switch (code) {
+			case 502 -> {
+				// Handshake rejected. The socket often closes just after this. Wake the reconnect loop now, before
+				// it marks the session up, or it connects again in the same breath and fills the Gateway's client table.
+				log.warn("IB 502: {}", text);
+				state.lastError("502 " + text);
+				state.connected(false, null);
+				hub.publish("connection", state.status(ordersEnabled));
+				listener.closed();
+				return;
+			}
 			case 1100 -> {
 				log.warn("IB 1100: {}", text);
 				state.lastError(code + " " + text);

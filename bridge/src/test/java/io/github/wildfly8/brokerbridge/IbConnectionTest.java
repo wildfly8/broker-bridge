@@ -69,4 +69,32 @@ class IbConnectionTest {
 			conn.stop();
 		}
 	}
+
+	/** The Gateway's daily restart accepts the socket, then sends 502. The next attempt waits the backoff. */
+	@Test
+	void a502DuringTheHandshakeWaitsBeforeAnotherAttempt() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(100, System.currentTimeMillis()));
+		FakeIbClient ib = new FakeIbClient();
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+		callbacks.listener(conn);
+		ib.onConnect = () -> callbacks.error(-1, 0L, 502, "Couldn't connect to TWS", null);
+
+		conn.start();
+		try {
+			waitFor(() -> ib.connectAttempts >= 1);
+			Thread.sleep(120);
+			assertEquals(1, ib.connectAttempts, "a 502 must not open another API client in the same breath");
+			assertFalse(state.connected());
+			assertTrue(ib.calls.contains("disconnect"), ib.calls.toString());
+			Thread.sleep(400);
+			assertTrue(ib.connectAttempts >= 2 && ib.connectAttempts <= 3, "attempts after the backoff: " + ib.connectAttempts);
+			assertFalse(state.connected());
+		} finally {
+			conn.stop();
+		}
+	}
 }

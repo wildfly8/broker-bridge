@@ -16,6 +16,8 @@ class FakeIbClient implements IbClient {
 	volatile boolean connected;
 	volatile boolean refuseConnect;
 	volatile int connectAttempts;
+	/** Runs after a successful handshake, before {@link #connect} returns. Used to deliver error 502 in that window. */
+	volatile Runnable onConnect = () -> {};
 	volatile BiConsumer<Integer, Boolean> onMktData = (id, snapshot) -> {};
 	volatile BiConsumer<Integer, Contract> onHistory = (id, c) -> {};
 	volatile BiConsumer<Integer, Contract> onDetails = (id, c) -> {};
@@ -26,6 +28,9 @@ class FakeIbClient implements IbClient {
 		connectAttempts++;
 		calls.add("connect " + host + ":" + port + " " + clientId);
 		connected = !refuseConnect;
+		if (connected) {
+			onConnect.run();
+		}
 		return connected;
 	}
 

@@ -20,6 +20,8 @@ final class IbConnection implements IbCallbacks.SessionListener {
 	private final Object wake = new Object();
 	private volatile boolean running;
 	private volatile Thread loop;
+	/** Set when the Gateway closes the socket, including a 502 during the handshake. */
+	private volatile boolean dropped;
 
 	IbConnection(BridgeConfig config, IbClient client, BridgeState state, EventHub hub, BrokerService broker,
 			Duration minBackoff, Duration maxBackoff) {
@@ -58,9 +60,7 @@ final class IbConnection implements IbCallbacks.SessionListener {
 					if (connect()) {
 						backoff = minBackoff;
 					} else {
-						log.info("Retrying IB connection in {} s", backoff.toSeconds());
-						Thread.sleep(backoff);
-						backoff = backoff.multipliedBy(2).compareTo(maxBackoff) > 0 ? maxBackoff : backoff.multipliedBy(2);
+						backoff = pause(backoff);
 						continue;
 					}
 				}
@@ -69,6 +69,12 @@ final class IbConnection implements IbCallbacks.SessionListener {
 						wake.wait(30_000);
 					}
 				}
+				// A handshake the Gateway accepts and then drops (error 502 during its daily restart)
+				// used to loop straight back into connect(). That opened a new API client every few
+				// dozen milliseconds, filled the Gateway's client table, and left the session down.
+				if (running && !client.isConnected()) {
+					backoff = pause(backoff);
+				}
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 				return;
@@ -76,7 +82,16 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		}
 	}
 
+	/** Sleeps, then returns the next backoff (doubled, capped at {@link #maxBackoff}). */
+	private Duration pause(Duration backoff) throws InterruptedException {
+		log.info("Retrying IB connection in {} s", backoff.toSeconds());
+		Thread.sleep(backoff);
+		Duration next = backoff.multipliedBy(2);
+		return next.compareTo(maxBackoff) > 0 ? maxBackoff : next;
+	}
+
 	private boolean connect() {
+		dropped = false;
 		log.info("Connecting to IB at {}:{} as client {}", config.ibHost(), config.ibPort(), config.ibClientId());
 		try {
 			if (!client.connect(config.ibHost(), config.ibPort(), config.ibClientId())) {
@@ -86,10 +101,16 @@ final class IbConnection implements IbCallbacks.SessionListener {
 			log.warn("IB connect failed: {}", e.toString());
 			return false;
 		}
+		if (dropped || !client.isConnected()) {
+			return dropHandshake();
+		}
 		client.reqMarketDataType(config.marketDataType());
 		client.reqIds();
 		// fills made while the bridge was disconnected; already-delivered ones are dropped by fill id
 		client.reqExecutions(state.newRequestId(), config.ibClientId());
+		if (dropped || !client.isConnected()) {
+			return dropHandshake();
+		}
 		state.connected(true, client.serverVersion());
 		state.lastError(null);
 		log.info("Connected to IB, server version {}", client.serverVersion());
@@ -98,8 +119,21 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		return true;
 	}
 
+	/** The Gateway closed the socket during the handshake. Release the client id and do not mark the session up. */
+	private boolean dropHandshake() {
+		log.warn("IB dropped the handshake; waiting before another attempt");
+		try {
+			client.disconnect();
+		} catch (RuntimeException e) {
+			log.warn("IB disconnect after a dropped handshake: {}", e.toString());
+		}
+		state.connected(false, null);
+		return false;
+	}
+
 	@Override
 	public void closed() {
+		dropped = true;
 		synchronized (wake) {
 			wake.notifyAll();
 		}
