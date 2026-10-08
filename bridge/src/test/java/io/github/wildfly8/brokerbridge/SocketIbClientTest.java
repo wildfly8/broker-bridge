@@ -1,7 +1,6 @@
 package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -118,8 +117,9 @@ class SocketIbClientTest {
 			waitFor(() -> gw.received.contains("1"));  // REQ_MKT_DATA
 
 			gw.dropClient();
-			waitFor(() -> !state.connected());
-			assertFalse(client.isConnected());
+			// A dropped socket can arrive as error 502 before EClient reports the close. 502 marks the
+			// session down immediately; the socket flag follows. Wait for both, or the assertion races.
+			waitFor(() -> !state.connected() && !client.isConnected());
 		}
 	}
 }
