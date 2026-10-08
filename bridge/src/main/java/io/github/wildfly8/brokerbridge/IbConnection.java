@@ -111,10 +111,15 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		if (dropped || !client.isConnected()) {
 			return dropHandshake();
 		}
+		// Restore streams before the session is marked up. A reader that sees connected
+		// otherwise races the resubscribe that follows the flag.
+		broker.resubscribe();
+		if (dropped || !client.isConnected()) {
+			return dropHandshake();
+		}
 		state.connected(true, client.serverVersion());
 		state.lastError(null);
 		log.info("Connected to IB, server version {}", client.serverVersion());
-		broker.resubscribe();
 		hub.publish("connection", broker.status());
 		return true;
 	}

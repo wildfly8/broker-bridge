@@ -44,11 +44,11 @@ class IbConnectionTest {
 			assertFalse(state.connected());
 			ib.refuseConnect = false;
 			waitFor(state::connected);
+			waitFor(() -> ib.calls.contains("mktData 42 SPY [100] false"));
 			assertTrue(ib.calls.contains("connect 127.0.0.1:4002 11"));
 			assertTrue(ib.calls.contains("marketDataType 3"));
 			assertTrue(ib.calls.contains("reqIds"));
 			assertTrue(ib.calls.stream().anyMatch(c -> c.matches("executions \\d+ 11")), "fills made while disconnected are requested: " + ib.calls);
-			assertTrue(ib.calls.contains("mktData 42 SPY [100] false"), ib.calls.toString());
 			assertFalse(state.subscriptions.containsKey(43), "one-shot snapshots are not re-sent");
 
 			// Gateway restart: socket drops, then comes back
@@ -56,7 +56,7 @@ class IbConnectionTest {
 			callbacks.connectionClosed();
 			assertFalse(state.connected());
 			waitFor(state::connected);
-			assertEquals(2, ib.count("mktData 42 SPY"));
+			waitFor(() -> ib.count("mktData 42 SPY") == 2);
 
 			StringBuilder seen = new StringBuilder();
 			String f;
