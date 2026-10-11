@@ -36,31 +36,51 @@ final class EventLog implements AutoCloseable {
 	private static final Logger log = LoggerFactory.getLogger(EventLog.class);
 
 	private static final int MAX_ORDERS = 10_000;
+	/**
+	 * The most order records kept when none of the oldest has ended: the record of an order that has not ended is never dropped for age
+	 * (a GTC order can work for weeks, and its events are dropped as foreign once its record is gone: MTS DDD review O12, 002 T044), only
+	 * for this many.
+	 */
+	private static final int MAX_ORDERS_OPEN = 100_000;
 	private static final int MAX_FILL_IDS = 50_000;
+	/** The statuses after which an order does not work any more. */
+	private static final Set<String> FINAL_STATUSES = Set.of("Filled", "Cancelled", "ApiCancelled", "Inactive", "Rejected");
 
 	record Entry(long id, String event, String json) {}
 
 	record OrderRecord(long clientOrderId, int brokerOrderId, String tag, Instrument instrument) {}
 
 	private final int maxKept;
+	/** Order records kept before the oldest ended ones go; and the most that are kept when none has ended ({@link #MAX_ORDERS_OPEN}). */
+	private final int maxOrders;
+	private final int maxOrdersOpen;
 	private final Path journal;
 	private final ArrayDeque<Entry> kept = new ArrayDeque<>();
 	private final Map<Long, OrderRecord> orders = new LinkedHashMap<>();
+	/** The latest status of an order that the kept events (or the journal) have one for. */
+	private final Map<Long, String> lastStatus = new java.util.HashMap<>();
 	private final Set<String> fillIds = new LinkedHashSet<>();
 	private long nextId;
-	/** Order events with an id at or below this may be missing (evicted, or before this process without a journal). */
+	/** Order events with an id at or below this may be missing (evicted, or before this process: no journal, or a new or lost one). */
 	private long horizon;
 	private BufferedWriter writer;
 	private FileChannel channel;
 
-	private EventLog(int maxKept, Path journal) {
+	private EventLog(int maxKept, Path journal, int maxOrders, int maxOrdersOpen) {
 		this.maxKept = maxKept;
 		this.journal = journal;
+		this.maxOrders = maxOrders;
+		this.maxOrdersOpen = maxOrdersOpen;
 	}
 
 	/** In-memory only: replay works across client reconnects but not across a bridge restart. */
 	static EventLog inMemory(int maxKept, long nowMillis) {
-		EventLog l = new EventLog(maxKept, null);
+		return inMemory(maxKept, nowMillis, MAX_ORDERS, MAX_ORDERS_OPEN);
+	}
+
+	/** Tests: other limits for the order records. */
+	static EventLog inMemory(int maxKept, long nowMillis, int maxOrders, int maxOrdersOpen) {
+		EventLog l = new EventLog(maxKept, null, maxOrders, maxOrdersOpen);
 		l.nextId = nowMillis * 1000;
 		l.horizon = l.nextId - 1;
 		return l;
@@ -68,9 +88,15 @@ final class EventLog implements AutoCloseable {
 
 	/** Loads (and compacts) {@code dir/journal.jsonl}, then appends to it. */
 	static EventLog open(Path dir, int maxKept, long nowMillis) throws IOException {
+		return open(dir, maxKept, nowMillis, MAX_ORDERS, MAX_ORDERS_OPEN);
+	}
+
+	/** Tests: other limits for the order records. */
+	static EventLog open(Path dir, int maxKept, long nowMillis, int maxOrders, int maxOrdersOpen) throws IOException {
 		Files.createDirectories(dir);
-		EventLog l = new EventLog(maxKept, dir.resolve("journal.jsonl"));
+		EventLog l = new EventLog(maxKept, dir.resolve("journal.jsonl"), maxOrders, maxOrdersOpen);
 		long maxId = 0;
+		boolean headed = false;
 		if (Files.exists(l.journal)) {
 			for (String line : Files.readAllLines(l.journal, StandardCharsets.UTF_8)) {
 				if (line.isBlank()) {
@@ -93,12 +119,23 @@ final class EventLog implements AutoCloseable {
 						}
 					}
 					case "o" -> l.rememberOrder(Json.MAPPER.treeToValue(n.path("order"), OrderRecord.class));
-					case "h" -> l.horizon = Math.max(l.horizon, n.path("id").asLong());
+					case "h" -> {
+						headed = true;
+						l.horizon = Math.max(l.horizon, n.path("id").asLong());
+					}
 					default -> { }
 				}
 			}
 		}
 		l.nextId = Math.max(maxId + 1, nowMillis * 1000);
+		if (!headed) {
+			// A journal that is new, or lost with its volume (or damaged to nothing), holds nothing from before this process: a client that
+			// resumes with an older cursor must be told that order events may be missing, as it is when there is no journal at all. Every
+			// journal this class has written starts with a header line, so a normal restart keeps the horizon the header recorded (MTS DDD
+			// review C2, 002 T037).
+			l.horizon = Math.max(l.horizon, l.nextId - 1);
+			log.warn("Journal {} is new or lost: order events from before id {} are not available to a client that resumes", l.journal, l.nextId);
+		}
 		l.compact();
 		l.openWriter();
 		log.info("Journal {}: {} order events kept, {} orders, next id {}", l.journal, l.kept.size(), l.orders.size(), l.nextId);
@@ -166,6 +203,19 @@ final class EventLog implements AutoCloseable {
 	}
 
 	private void keep(Entry e) {
+		if ("order-status".equals(e.event())) {
+			try {
+				JsonNode n = Json.MAPPER.readTree(e.json());
+				if (n.hasNonNull("clientOrderId") && n.hasNonNull("status")) {
+					lastStatus.put(n.path("clientOrderId").asLong(), n.path("status").asText());
+				}
+			} catch (IOException ex) {
+				log.warn("An order status event of {} chars could not be read for the order records: {}", e.json().length(), ex.toString());
+			}
+		}
+		if (lastStatus.size() > 2 * maxOrdersOpen) {
+			lastStatus.keySet().retainAll(orders.keySet());
+		}
 		kept.addLast(e);
 		while (kept.size() > maxKept) {
 			horizon = Math.max(horizon, kept.removeFirst().id());
@@ -175,8 +225,24 @@ final class EventLog implements AutoCloseable {
 	private void rememberOrder(OrderRecord o) {
 		orders.remove(o.clientOrderId());
 		orders.put(o.clientOrderId(), o);
-		while (orders.size() > MAX_ORDERS) {
-			orders.remove(orders.keySet().iterator().next());
+		if (orders.size() <= maxOrders) {
+			return;
+		}
+		// the oldest records go, those of orders that ended first and only those: an order whose last status is not final (or that has
+		// none yet) keeps its record, up to MAX_ORDERS_OPEN
+		java.util.Iterator<Map.Entry<Long, OrderRecord>> it = orders.entrySet().iterator();
+		while (orders.size() > maxOrders && it.hasNext()) {
+			Long id = it.next().getKey();
+			String status = lastStatus.get(id);
+			if (status != null && FINAL_STATUSES.contains(status)) {
+				it.remove();
+				lastStatus.remove(id);
+			}
+		}
+		it = orders.entrySet().iterator();
+		while (orders.size() > maxOrdersOpen && it.hasNext()) {
+			lastStatus.remove(it.next().getKey());
+			it.remove();
 		}
 	}
 

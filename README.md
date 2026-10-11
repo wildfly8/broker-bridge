@@ -55,7 +55,7 @@ Bridge settings, independent of the broker:
 |---|---|---|
 | `BRIDGE_BIND` / `BRIDGE_PORT` | `127.0.0.1` / `8090` | API listen address; the API has **no authentication** except the order routes below |
 | `BRIDGE_ORDERS_ENABLED` | `false` | only `true` (any case) lets orders through; `1` and `yes` do not |
-| `BRIDGE_ORDER_TOKEN_FILE` / `BRIDGE_ORDER_TOKEN` | unset | the bearer token the order routes (`/v1/orders`) require (`Authorization: Bearer <token>`, otherwise 401 `WWW-Authenticate: Bearer` before anything reaches the broker); the file wins; at least 16 characters, an unusable value stops the start and is never quoted; unset: the order routes are open like the others (and a start with orders enabled says so as a warning) |
+| `BRIDGE_ORDER_TOKEN_FILE` / `BRIDGE_ORDER_TOKEN` | unset | the bearer token the order routes (`/v1/orders`) require (`Authorization: Bearer <token>`, otherwise 401 `WWW-Authenticate: Bearer` before anything reaches the broker); the file wins; at least 16 characters, an unusable value stops the start and is never quoted (a file the container's user `bridge` cannot read is unusable: give the container the file's group, `group_add` in compose); unset: the order routes are open like the others (and a start with orders enabled says so as a warning) |
 | `BRIDGE_DATA_DIR` | unset (image: `/data`) | journal of order events and order ids, so replay survives a restart |
 | `BRIDGE_REPLAY_MAX` | `100000` | order events kept for replay |
 | `BRIDGE_WATCHDOG` | `on` | `off` stops the bridge from ending itself when its connection machinery is stuck (see Behaviour) |
@@ -76,7 +76,7 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 
 | Method | Path | Body → response |
 |---|---|---|
-| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt}` (`startedAt` changes only when the bridge restarts) |
+| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt, durable}` (`startedAt` changes only when the bridge restarts; `durable`: the order events are journaled on disk, so a restart keeps them) |
 | POST | `/v1/subscriptions` | `{instrument, tag, snapshot, genericTicks}` → `{subscriptionId}` · 503 disconnected |
 | DELETE | `/v1/subscriptions/{id}` | → 204 |
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
@@ -101,7 +101,9 @@ are kept and, with `BRIDGE_DATA_DIR`, journaled to disk (fsync per event). Recon
 standard `Last-Event-ID: <id>` header (or `/v1/events?lastEventId=<id>`) to get every kept order
 event after that id, in order, followed by live events, with no gap or repeat in between. Quotes
 are not replayed. If the id is older than what was kept you first get
-`event: replay-truncated` `{after, oldestKept}`. After those replayed order events (and when there is
+`event: replay-truncated` `{after, oldestKept}`: also when the journal is new or was lost with its volume (the
+bridge cannot know what happened before it), and for the first start on an empty volume. A restart that finds its
+journal keeps the horizon the journal recorded and invents none. After those replayed order events (and when there is
 nothing to replay) the bridge sends one `event: replay-complete` with id 0, `{replayed, after}` (`after` only when the
 client asked to resume). It is not journaled. On every broker connection the bridge also asks
 the broker for the day's executions, so fills made while it was down are sent too. Fills are unique by
@@ -134,7 +136,11 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
   restart policy starts a new bridge in seconds. `BRIDGE_WATCHDOG=off` turns it off.
 - Order ids: the caller's `clientOrderId` is mapped to the broker's order id inside the bridge; status, fills and order
   errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
-  earlier orders still arrive after a bridge restart.
+  earlier orders still arrive after a bridge restart. A broker order id that belongs to another order is never used
+  again: the counter is kept above the highest id the journal has (the Gateway's "Reset API order ID sequence" or a
+  lost settings volume can make the broker's own counter come back lower), and an id taken anyway is skipped (up to
+  10,000, then 503). The record of an order whose last status is not final (a GTC order can work for weeks) is not
+  dropped for age; the oldest records of ended orders go first, and at most 100,000 are kept in all.
 - Account ids are masked in logs, status and events (`DU*****67`).
 
 ## Layout

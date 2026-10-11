@@ -19,8 +19,11 @@ final class EventHub {
 
 	static final String HEARTBEAT = ": heartbeat\n\n";
 
-	/** One SSE frame; {@code id} is 0 for frames without an id line. */
-	record Frame(long id, String text) {}
+	/**
+	 * One SSE frame; {@code id} is 0 for frames without an id line. {@code kept}: an order event, which is kept for replay (a quote, a
+	 * {@code connection} event and a heartbeat are not).
+	 */
+	record Frame(long id, String text, boolean kept) {}
 
 	static final class Client {
 		private final BlockingQueue<Frame> frames;
@@ -82,7 +85,7 @@ final class EventHub {
 		if (keep) {
 			eventLog.keepOrderEvent(id, event, data);
 		}
-		Frame frame = new Frame(id, frame(id, event, Json.write(data)));
+		Frame frame = new Frame(id, frame(id, event, Json.write(data)), keep);
 		for (Client c : clients) {
 			if (!c.frames.offer(frame)) {
 				c.dropped = true;
@@ -98,7 +101,17 @@ final class EventHub {
 			return null;
 		}
 		Frame f = c.frames.poll(timeoutMs, TimeUnit.MILLISECONDS);
-		return f != null ? f : c.dropped ? null : new Frame(0, HEARTBEAT);
+		return f != null ? f : c.dropped ? null : new Frame(0, HEARTBEAT, false);
+	}
+
+	/**
+	 * Whether a live frame of a client that resumed was already sent in its replay: only an order event with an id at or below the last
+	 * replayed one is. A quote or a {@code connection} event published between the client's registration and the replay's read has an
+	 * id below the last replayed order event too, and is not in the replay: skipping it kept a stale connected flag at the client until
+	 * the next one (MTS DDD review O15, 002 T046).
+	 */
+	static boolean alreadyReplayed(Frame f, long replayedUpTo) {
+		return f.kept() && f.id() != 0 && f.id() <= replayedUpTo;
 	}
 
 	static String frame(long id, String event, String json) {

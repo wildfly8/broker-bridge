@@ -31,6 +31,12 @@ final class BridgeState {
 
 	/** Next IB order id; negative until IB has sent one. */
 	final AtomicInteger nextOrderId = new AtomicInteger(-1);
+	/**
+	 * Above every broker order id the journal and this run have used. IB's own counter can come back lower (the Gateway's "Reset API order ID
+	 * sequence", a lost settings volume), and an id the journal knows belongs to another order whose fills and statuses would then be booked
+	 * on the new one (MTS DDD review O12, 002 T044): the counter is never below this.
+	 */
+	final AtomicInteger orderIdFloor = new AtomicInteger(0);
 	final Map<Integer, OrderRef> ordersByIbId = new ConcurrentHashMap<>();
 	final Map<Long, Integer> ibIdByClientOrderId = new ConcurrentHashMap<>();
 
@@ -41,6 +47,7 @@ final class BridgeState {
 	private volatile String accounts;
 	private volatile String lastError;
 	private volatile Instant since = Instant.now();
+	private volatile boolean durable;
 
 	int newRequestId() {
 		return nextRequestId.incrementAndGet();
@@ -74,9 +81,14 @@ final class BridgeState {
 		dataFarms.put(name, up);
 	}
 
+	/** Whether the order events are journaled on disk ({@link EventLog#durable}); told once, by the service that owns the log. */
+	void durable(boolean durable) {
+		this.durable = durable;
+	}
+
 	ConnectionStatus status(boolean ordersEnabled) {
 		return new ConnectionStatus(connected, serverVersion, accounts, lastError, ordersEnabled, since.toString(),
-				new TreeMap<>(dataFarms), startedAt);
+				new TreeMap<>(dataFarms), startedAt, durable);
 	}
 
 	/** Collects one snapshot; completes when the wanted field arrives or at snapshot end. */

@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ib.client.ContractDetails;
@@ -40,8 +41,12 @@ class BridgeHttpServerTest {
 	}
 
 	private void start(boolean ordersEnabled, boolean connected, String orderToken) throws Exception {
+		start(ordersEnabled, connected, orderToken, EventLog.inMemory(1000, System.currentTimeMillis()));
+	}
+
+	private void start(boolean ordersEnabled, boolean connected, String orderToken, EventLog eventLog) throws Exception {
 		state = new BridgeState();
-		hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		hub = new EventHub(eventLog);
 		ib = new FakeIbClient();
 		ib.connected = connected;
 		state.connected(connected, connected ? 222 : null);
@@ -448,6 +453,90 @@ class BridgeHttpServerTest {
 			assertTrue(frames.get(1)[2].contains("\"after\":1"));
 		}
 		assertEquals(400, openEvents("", "abc").statusCode());
+	}
+
+	/** MTS DDD review C2 (002 T037): the cursor of a client outlives the volume of the bridge. */
+	@Test
+	void aClientWithAnOlderCursorThanAFreshDurableJournalIsToldThatEventsMayBeMissing(@TempDir java.nio.file.Path dir) throws Exception {
+		start(false, true, null, EventLog.open(dir, 1000, System.currentTimeMillis()));
+		HttpResponse<InputStream> r = openEvents("", "5");
+		try (BufferedReader in = new BufferedReader(new InputStreamReader(r.body(), StandardCharsets.UTF_8))) {
+			java.util.List<String[]> frames = readUntil(in, "replay-complete", 1);
+			assertEquals("connection", frames.get(0)[1]);
+			assertEquals("replay-truncated", frames.get(1)[1], "a cursor from before this journal began: order events may be lost");
+			assertTrue(frames.get(1)[2].contains("\"after\":5"), frames.get(1)[2]);
+			assertEquals("replay-complete", frames.get(2)[1]);
+		}
+	}
+
+	/** MTS DDD review O12 (002 T044 c). */
+	@Test
+	void statusSaysWhetherTheOrderEventsAreJournaled(@TempDir java.nio.file.Path dir) throws Exception {
+		start(false, true);
+		assertFalse(json(send("GET", "/v1/status", null)).get("durable").asBoolean(), "BRIDGE_DATA_DIR unset: a restart loses the order events");
+		server.stop();
+		start(false, true, null, EventLog.open(dir, 1000, System.currentTimeMillis()));
+		assertTrue(json(send("GET", "/v1/status", null)).get("durable").asBoolean());
+	}
+
+	private static BridgeState.OrderRef refOf(long clientOrderId) {
+		return new BridgeState.OrderRef(clientOrderId, "4", Model.Instrument.stock("SPY", "SMART", "USD"));
+	}
+
+	/**
+	 * MTS DDD review O12 (002 T044 a): IB's counter can come back lower than the ids this bridge has used (the Gateway's "Reset API order ID
+	 * sequence", a lost settings volume); the new order must not take an id that belongs to an old order, whose statuses and fills would then
+	 * be booked on it.
+	 */
+	@Test
+	void theBrokerIdCounterNeverGoesBelowTheJournal(@TempDir java.nio.file.Path dir) throws Exception {
+		EventLog log = EventLog.open(dir, 1000, System.currentTimeMillis());
+		log.recordOrder(new EventLog.OrderRecord(6001, 500, "4", Model.Instrument.stock("SPY", "SMART", "USD")));
+		log.recordOrder(new EventLog.OrderRecord(6002, 501, "4", Model.Instrument.stock("SPY", "SMART", "USD")));
+		start(true, true, null, log);
+		callbacks.nextValidId(10);
+		assertEquals(502, state.nextOrderId.get(), "IB said 10; the journal has used up to 501");
+		HttpResponse<String> r = send("POST", "/v1/orders", order(7001L, false));
+		assertEquals(202, r.statusCode(), r.body());
+		assertTrue(ib.calls.contains("placeOrder 502 BUY 100 LMT 500.0"), ib.calls.toString());
+		assertEquals(502, state.ibIdByClientOrderId.get(7001L));
+		assertEquals(6001L, state.ordersByIbId.get(500).clientOrderId(), "the old orders keep their ids");
+		assertEquals(6002L, state.ordersByIbId.get(501).clientOrderId());
+		callbacks.nextValidId(7);
+		assertTrue(state.nextOrderId.get() >= 503, "also after the connection comes back: " + state.nextOrderId.get());
+	}
+
+	@Test
+	void aBrokerIdOfAnotherOrderIsSkippedAndItsEventsStayWithIt() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		state.ordersByIbId.put(10, refOf(6001));
+		state.ordersByIbId.put(11, refOf(6002));
+		HttpResponse<String> r = send("POST", "/v1/orders", order(7001L, false));
+		assertEquals(202, r.statusCode(), r.body());
+		assertTrue(ib.calls.contains("placeOrder 12 BUY 100 LMT 500.0"), ib.calls.toString());
+		assertEquals(13, state.nextOrderId.get());
+		assertEquals(6001L, state.ordersByIbId.get(10).clientOrderId());
+		assertEquals(6002L, state.ordersByIbId.get(11).clientOrderId());
+		assertEquals(7001L, state.ordersByIbId.get(12).clientOrderId());
+		orderStatus("Filled"); // broker id 10
+		java.util.List<EventLog.Entry> kept = hub.eventLog().after(0);
+		assertEquals(1, kept.size());
+		assertTrue(kept.get(0).json().contains("\"clientOrderId\":6001"), "a status for broker id 10 is the old order's: " + kept.get(0).json());
+	}
+
+	@Test
+	void whenNoBrokerIdIsFreeTheOrderIsRefusedAndNothingIsClaimed() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		for (int i = 10; i < 10 + BrokerService.MAX_SKIPPED_BROKER_IDS + 5; i++) {
+			state.ordersByIbId.put(i, refOf(100_000L + i));
+		}
+		HttpResponse<String> r = send("POST", "/v1/orders", order(7001L, false));
+		assertEquals(503, r.statusCode(), r.body());
+		assertTrue(json(r).get("retryable").asBoolean());
+		assertFalse(state.ibIdByClientOrderId.containsKey(7001L), "no client id is claimed for an order that was not placed");
+		assertEquals(0, ib.count("placeOrder"));
 	}
 
 	private static void waitFor(java.util.function.BooleanSupplier cond) throws InterruptedException {

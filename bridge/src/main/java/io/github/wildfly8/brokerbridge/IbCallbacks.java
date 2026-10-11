@@ -174,7 +174,7 @@ class IbCallbacks extends DefaultEWrapper {
 
 	@Override
 	public void nextValidId(int orderId) {
-		state.nextOrderId.accumulateAndGet(orderId, Math::max);
+		state.nextOrderId.accumulateAndGet(Math.max(orderId, state.orderIdFloor.get()), Math::max);
 	}
 
 	@Override

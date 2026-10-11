@@ -203,8 +203,8 @@ final class BridgeHttpServer {
 			log.info("Event-stream client connected ({} total)", hub.clientCount());
 			EventHub.Frame frame;
 			while ((frame = hub.next(client, heartbeatMs)) != null) {
-				if (frame.id() != 0 && frame.id() <= replayedUpTo) {
-					continue; // already sent in the replay
+				if (EventHub.alreadyReplayed(frame, replayedUpTo)) {
+					continue; // an order event the replay has just sent
 				}
 				write(out, frame.text());
 			}

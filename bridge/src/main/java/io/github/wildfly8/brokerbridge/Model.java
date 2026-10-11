@@ -56,10 +56,11 @@ public final class Model {
 
 	/**
 	 * {@code dataFarms}: broker data-farm name → connected (e.g. usfarm, usopt, ushmds). {@code startedAt} changes
-	 * only when the bridge restarts, so a client can tell its subscriptions are gone.
+	 * only when the bridge restarts, so a client can tell its subscriptions are gone. {@code durable}: the order events are journaled on
+	 * disk ({@code BRIDGE_DATA_DIR}), so a restart of the bridge keeps them; false, they are lost with it (MTS DDD review O12, 002 T044).
 	 */
 	public record ConnectionStatus(boolean connected, Integer serverVersion, String accounts, String lastError,
-			boolean ordersEnabled, String since, Map<String, Boolean> dataFarms, String startedAt) {}
+			boolean ordersEnabled, String since, Map<String, Boolean> dataFarms, String startedAt, boolean durable) {}
 
 	public record SnapshotEnd(int subscriptionId, String tag) {}
 

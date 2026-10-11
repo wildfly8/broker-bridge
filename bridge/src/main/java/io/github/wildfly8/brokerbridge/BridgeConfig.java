@@ -41,10 +41,12 @@ public record BridgeConfig(String ibHost, int ibPort, int ibClientId, String bin
 			try {
 				token = Files.readString(Path.of(file.trim()), StandardCharsets.UTF_8).trim();
 			} catch (IOException e) {
-				throw new IllegalArgumentException("BRIDGE_ORDER_TOKEN_FILE: cannot read " + file.trim());
+				// worded so that a log filter which hides what follows "...token...:" (the VM's masking does) leaves the cause readable
+				throw new IllegalArgumentException("the file named by BRIDGE_ORDER_TOKEN_FILE cannot be read (" + e.getClass().getSimpleName() + ") - "
+						+ file.trim() + " - the user of the container needs read access to it, for instance through the group of the file");
 			}
 			if (token.isEmpty()) {
-				throw new IllegalArgumentException("BRIDGE_ORDER_TOKEN_FILE: " + file.trim() + " is empty");
+				throw new IllegalArgumentException("the file named by BRIDGE_ORDER_TOKEN_FILE is empty - " + file.trim());
 			}
 		} else {
 			String v = env.get("BRIDGE_ORDER_TOKEN");

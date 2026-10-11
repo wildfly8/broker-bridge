@@ -27,6 +27,8 @@ final class BrokerService {
 
 	private static final Logger log = LoggerFactory.getLogger(BrokerService.class);
 
+	/** Broker ids that belong to other orders that a new order skips before it gives up (a counter that came back far below the journal). */
+	static final int MAX_SKIPPED_BROKER_IDS = 10_000;
 	static final long SNAPSHOT_TIMEOUT_MS = 10_000;
 	static final long HISTORY_TIMEOUT_MS = 60_000;
 	static final long RESOLVE_TIMEOUT_MS = 15_000;
@@ -43,9 +45,11 @@ final class BrokerService {
 		this.state = state;
 		this.ordersEnabled = ordersEnabled;
 		this.eventLog = eventLog;
+		state.durable(eventLog.durable());
 		for (EventLog.OrderRecord o : eventLog.orders()) {
 			state.ordersByIbId.put(o.brokerOrderId(), new OrderRef(o.clientOrderId(), o.tag(), o.instrument()));
 			state.ibIdByClientOrderId.put(o.clientOrderId(), o.brokerOrderId());
+			state.orderIdFloor.accumulateAndGet(o.brokerOrderId() + 1, Math::max);
 		}
 	}
 
@@ -168,16 +172,30 @@ final class BrokerService {
 			if (state.ibIdByClientOrderId.containsKey(clientOrderId)) {
 				throw new ApiException(409, "clientOrderId " + clientOrderId + " already used");
 			}
-			ibId = state.nextOrderId.getAndUpdate(v -> v < 0 ? v : v + 1);
-			if (ibId < 0) {
-				throw new ApiException(503, "broker has not issued order ids yet", true);
+			// a broker id that already belongs to another order is never reused (MTS DDD review O12): IB's counter can come back lower than
+			// the ids this bridge has used, and the old order's statuses and fills would be booked on the new one. The floor keeps the counter
+			// above the journal; this claim keeps it off any id that is taken anyway. The ids skipped stay unused, which IB does not mind.
+			OrderRef ref = new OrderRef(clientOrderId, r.tag(), r.instrument());
+			int skipped = 0;
+			while (true) {
+				ibId = state.nextOrderId.getAndUpdate(v -> v < 0 ? v : v + 1);
+				if (ibId < 0) {
+					throw new ApiException(503, "broker has not issued order ids yet", true);
+				}
+				if (state.ordersByIbId.putIfAbsent(ibId, ref) == null) {
+					break;
+				}
+				if (++skipped >= MAX_SKIPPED_BROKER_IDS) {
+					throw new ApiException(503, "no free broker order id after " + skipped + " tries: " + ibId + " and the ids below it belong to other orders", true);
+				}
 			}
-			// the id is claimed in one step: of two requests with the same clientOrderId that passed the check above together, one is
-			// refused here (MTS DDD review O14: both used to be placed, two IB orders under one id). The id taken from IB's counter stays
-			// unused, which IB does not mind.
+			// the client id is claimed in one step: of two requests with the same clientOrderId that passed the check above together, one is
+			// refused here (MTS DDD review O14: both used to be placed, two IB orders under one id)
 			if (state.ibIdByClientOrderId.putIfAbsent(clientOrderId, ibId) != null) {
+				state.ordersByIbId.remove(ibId, ref);
 				throw new ApiException(409, "clientOrderId " + clientOrderId + " already used");
 			}
+			state.orderIdFloor.accumulateAndGet(ibId + 1, Math::max);
 		}
 		com.ib.client.Order order = Orders.toIb(r, ibId);
 		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.tag(), r.instrument()));

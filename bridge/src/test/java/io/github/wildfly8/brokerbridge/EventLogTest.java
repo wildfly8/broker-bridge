@@ -59,7 +59,53 @@ class EventLogTest {
 			assertEquals(1, log.orders().size());
 			assertEquals(10, log.orders().get(0).brokerOrderId());
 			assertEquals("4", log.orders().get(0).tag());
-			assertFalse(log.truncatedAfter(0));
+			assertFalse(log.truncatedAfter(a - 1), "nothing the journal kept is missing for a client that was at its start");
+			assertTrue(log.truncatedAfter(0), "the journal began with the first run: a cursor from before it is older than what is kept");
+		}
+	}
+
+	/** MTS DDD review C2 (002 T037): a client's cursor outlives the bridge's volume; the bridge must say that order events may be missing. */
+	@Test
+	void aNewOrLostJournalAnnouncesThatEarlierEventsMayBeMissing() throws Exception {
+		long oldCursor;
+		try (EventLog first = EventLog.open(dir, 100, 5_000L)) {
+			oldCursor = first.nextId();
+			first.keepOrderEvent(oldCursor, "fill", Map.of("clientOrderId", 7001, "fillId", "0001.01"));
+		}
+		// the volume is lost, the client (MTS) keeps its cursor
+		Files.delete(dir.resolve("journal.jsonl"));
+		try (EventLog lost = EventLog.open(dir, 100, 9_000L)) {
+			assertTrue(lost.truncatedAfter(oldCursor), "events after the client's cursor existed and are gone");
+			assertTrue(lost.after(oldCursor).isEmpty());
+			long mine = lost.nextId();
+			assertFalse(lost.truncatedAfter(mine), "a cursor from this journal's own time is complete");
+		}
+		// a journal damaged to nothing is a lost one
+		Files.writeString(dir.resolve("journal.jsonl"), "", StandardCharsets.UTF_8);
+		try (EventLog empty = EventLog.open(dir, 100, 20_000L)) {
+			assertTrue(empty.truncatedAfter(oldCursor));
+		}
+		// and the first start ever on an empty volume says the same of any older cursor, so that a restored volume or a copied cursor cannot pass as complete
+		Path fresh = dir.resolve("fresh");
+		try (EventLog first = EventLog.open(fresh, 100, 30_000L)) {
+			assertTrue(first.truncatedAfter(oldCursor));
+			assertFalse(first.truncatedAfter(first.nextId()));
+		}
+	}
+
+	/** A restart that finds its journal keeps what the journal said and invents no truncation. */
+	@Test
+	void aJournalThatIsThereKeepsItsHorizonAcrossRestarts() throws Exception {
+		long a;
+		try (EventLog log = EventLog.open(dir, 100, 5_000L)) {
+			a = log.nextId();
+			log.keepOrderEvent(a, "order-status", Map.of("clientOrderId", 7001, "status", "Submitted"));
+		}
+		for (int restart = 0; restart < 3; restart++) {
+			try (EventLog log = EventLog.open(dir, 100, 6_000L + restart)) {
+				assertFalse(log.truncatedAfter(a - 1), "restart " + restart + ": the horizon is the one recorded, not this process's start");
+				assertEquals(1, log.after(a - 1).size());
+			}
 		}
 	}
 
@@ -82,6 +128,74 @@ class EventLogTest {
 		}
 		long lines = Files.readAllLines(dir.resolve("journal.jsonl")).stream().filter(l -> l.contains("\"t\":\"e\"")).count();
 		assertEquals(2, lines, "compacted on open");
+	}
+
+	private static void order(EventLog log, long clientOrderId, String status) {
+		log.recordOrder(new EventLog.OrderRecord(clientOrderId, (int) clientOrderId + 1000, "4", Instrument.stock("SPY", "SMART", "USD")));
+		if (status != null) {
+			log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", clientOrderId, "status", status));
+		}
+	}
+
+	private static List<Long> orderIds(EventLog log) {
+		return log.orders().stream().map(EventLog.OrderRecord::clientOrderId).toList();
+	}
+
+	/** MTS DDD review O12 (002 T044 b): a GTC order can work for weeks; the newest 10,000 records were all that survived. */
+	@Test
+	void theRecordOfAnOrderThatHasNotEndedIsKeptWhileEndedOnesGoOldestFirst() {
+		EventLog log = EventLog.inMemory(1_000, 1_000_000L, 5, 20);
+		order(log, 1, "Submitted");   // the old order that still works
+		order(log, 2, "Filled");
+		order(log, 3, "Cancelled");
+		order(log, 4, null);          // placed, no status yet: not known to have ended
+		order(log, 5, "Rejected");
+		assertEquals(List.of(1L, 2L, 3L, 4L, 5L), orderIds(log));
+		order(log, 6, "Filled");
+		assertEquals(List.of(1L, 3L, 4L, 5L, 6L), orderIds(log), "the oldest ended one (2) went, not the open one (1)");
+		order(log, 7, "Filled");
+		order(log, 8, "Filled");
+		assertEquals(List.of(1L, 4L, 6L, 7L, 8L), orderIds(log), "every record of an ended order is a candidate, oldest first; 1 and 4 have not ended");
+		order(log, 9, "Submitted");
+		order(log, 10, "Submitted");
+		assertEquals(List.of(1L, 4L, 8L, 9L, 10L), orderIds(log), "the ended ones went as they came to be the oldest of their kind; 1 and 4 stay");
+	}
+
+	@Test
+	void anOrderStatusAfterTheEndOfAnOrderRecordIsTheLatest() {
+		EventLog log = EventLog.inMemory(1_000, 1_000_000L, 2, 20);
+		order(log, 1, "Submitted");
+		order(log, 2, "Submitted");
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 1L, "status", "Filled"));
+		order(log, 3, "Submitted");
+		assertEquals(List.of(2L, 3L), orderIds(log), "1 ended after it was recorded: it is the one that goes");
+	}
+
+	@Test
+	void orderRecordsOfOrdersThatNeverEndAreStillBounded() {
+		EventLog log = EventLog.inMemory(1_000, 1_000_000L, 3, 6);
+		for (long i = 1; i <= 10; i++) {
+			order(log, i, "Submitted");
+		}
+		assertEquals(List.of(5L, 6L, 7L, 8L, 9L, 10L), orderIds(log), "a hard cap keeps the journal from growing for ever");
+	}
+
+	@Test
+	void theRecordsOfOrdersThatHaveNotEndedSurviveARestartAndItsCompaction() throws Exception {
+		try (EventLog log = EventLog.open(dir, 1_000, 5_000L, 4, 20)) {
+			order(log, 1, "Submitted");
+			for (long i = 2; i <= 9; i++) {
+				order(log, i, "Filled");
+			}
+			assertEquals(List.of(1L, 7L, 8L, 9L), orderIds(log));
+		}
+		// the journal has every "o" line the run wrote; the load applies the same rule in the same order, so it comes out the same
+		try (EventLog log = EventLog.open(dir, 1_000, 6_000L, 4, 20)) {
+			assertEquals(List.of(1L, 7L, 8L, 9L), orderIds(log), "the open order's record is read back from the journal");
+		}
+		try (EventLog log = EventLog.open(dir, 1_000, 7_000L, 4, 20)) {
+			assertEquals(List.of(1L, 7L, 8L, 9L), orderIds(log), "and again after the compaction of the second open");
+		}
 	}
 
 	@Test
