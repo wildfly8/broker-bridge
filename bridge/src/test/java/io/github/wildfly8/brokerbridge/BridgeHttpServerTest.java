@@ -36,6 +36,10 @@ class BridgeHttpServerTest {
 	private BridgeHttpServer server;
 
 	private void start(boolean ordersEnabled, boolean connected) throws Exception {
+		start(ordersEnabled, connected, null);
+	}
+
+	private void start(boolean ordersEnabled, boolean connected, String orderToken) throws Exception {
 		state = new BridgeState();
 		hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
 		ib = new FakeIbClient();
@@ -43,7 +47,7 @@ class BridgeHttpServerTest {
 		state.connected(connected, connected ? 222 : null);
 		callbacks = new IbCallbacks(state, hub, ordersEnabled);
 		BrokerService broker = new BrokerService(ib, state, ordersEnabled, hub.eventLog());
-		server = new BridgeHttpServer("127.0.0.1", 0, broker, hub, 200);
+		server = new BridgeHttpServer("127.0.0.1", 0, broker, hub, 200, orderToken);
 		server.start();
 	}
 
@@ -55,8 +59,15 @@ class BridgeHttpServerTest {
 	}
 
 	private HttpResponse<String> send(String method, String path, String body) throws Exception {
+		return send(method, path, body, null);
+	}
+
+	private HttpResponse<String> send(String method, String path, String body, String authorization) throws Exception {
 		HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
 				.timeout(Duration.ofSeconds(10));
+		if (authorization != null) {
+			b.header("Authorization", authorization);
+		}
 		b.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
 		return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
 	}
@@ -208,6 +219,73 @@ class BridgeHttpServerTest {
 		assertTrue(ib.calls.contains("cancelOrder 10"));
 		assertEquals(404, send("DELETE", "/v1/orders/9999", null).statusCode());
 		assertEquals(11, state.nextOrderId.get());
+	}
+
+	private static final String TOKEN = "an-order-token-of-24-chars";
+
+	/**
+	 * MTS DDD review M1: the web server, the batch and whatever else shares the bridge's network namespace reach every route; with
+	 * a token configured only a request that carries it places or cancels an order, and nothing reaches the broker without it.
+	 */
+	@Test
+	void theOrderRoutesNeedTheBearerTokenWhenOneIsConfigured() throws Exception {
+		start(true, true, TOKEN);
+		state.nextOrderId.set(10);
+		HttpResponse<String> none = send("POST", "/v1/orders", order(7001L, false));
+		assertEquals(401, none.statusCode(), none.body());
+		assertEquals("Bearer", none.headers().firstValue("WWW-Authenticate").orElse(null));
+		assertTrue(json(none).get("error").asText().contains("nothing was sent to the broker"), none.body());
+		assertFalse(none.body().contains(TOKEN), "the answer never quotes the token");
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, false), "Bearer a-wrong-token-of-24-chars").statusCode());
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, false), "Bearer " + TOKEN.substring(1)).statusCode(), "a prefix is no token");
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, false), "Bearer " + TOKEN + "x").statusCode(), "nor is a longer string");
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, false), "Basic " + TOKEN).statusCode(), "only the Bearer scheme");
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, false), TOKEN).statusCode(), "the scheme is required");
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, true), "Bearer ").statusCode());
+		assertEquals(401, send("DELETE", "/v1/orders/7001", null).statusCode());
+		assertEquals(401, send("GET", "/v1/orders", null).statusCode(), "the token is asked for before the method is looked at");
+		assertEquals(401, send("POST", "/v1/orders", "{not json").statusCode(), "and before the body is read");
+		assertEquals(0, ib.count("placeOrder"), "nothing without the token reached the broker");
+		assertEquals(0, ib.count("cancelOrder"));
+		assertEquals(10, state.nextOrderId.get(), "no order id was used");
+
+		HttpResponse<String> placed = send("POST", "/v1/orders", order(7001L, false), "Bearer " + TOKEN);
+		assertEquals(202, placed.statusCode(), placed.body());
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, true), "bearer  " + TOKEN + " ").statusCode(),
+				"the scheme is not case-sensitive and the token may be surrounded by spaces");
+		assertEquals(202, send("DELETE", "/v1/orders/7001", null, "Bearer " + TOKEN).statusCode());
+		assertEquals(1, ib.count("cancelOrder"));
+	}
+
+	@Test
+	void theTokenIsAskedForBeforeTheOrderSwitchIsLookedAt() throws Exception {
+		start(false, true, TOKEN);
+		assertEquals(401, send("POST", "/v1/orders", order(7001L, false)).statusCode(), "an unauthenticated caller learns nothing about the switch");
+		HttpResponse<String> r = send("POST", "/v1/orders", order(7001L, false), "Bearer " + TOKEN);
+		assertEquals(403, r.statusCode());
+		assertTrue(json(r).get("error").asText().contains("BRIDGE_ORDERS_ENABLED"));
+		assertEquals(0, ib.count("placeOrder"));
+	}
+
+	@Test
+	void everyOtherRouteStaysOpenWhateverTheOrderTokenIs() throws Exception {
+		start(true, true, TOKEN);
+		assertEquals(200, send("GET", "/v1/status", null).statusCode());
+		HttpResponse<String> sub = send("POST", "/v1/subscriptions", "{\"instrument\":" + SPY + "}");
+		assertEquals(200, sub.statusCode(), sub.body());
+		assertEquals(204, send("DELETE", "/v1/subscriptions/" + json(sub).get("subscriptionId").asInt(), null).statusCode());
+		HttpRequest events = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/events")).build();
+		HttpResponse<InputStream> stream = http.send(events, HttpResponse.BodyHandlers.ofInputStream());
+		assertEquals(200, stream.statusCode());
+		stream.body().close();
+	}
+
+	@Test
+	void withoutAConfiguredTokenTheOrderRoutesAskForNone() throws Exception {
+		start(true, true, null);
+		state.nextOrderId.set(10);
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		assertEquals(202, send("POST", "/v1/orders", order(7002L, false), "Bearer anything").statusCode(), "a token nobody asked for is ignored");
 	}
 
 	/**

@@ -54,7 +54,12 @@ public final class BridgeMain {
 		IbConnection connection = new IbConnection(config, client, state, hub, broker, Duration.ofSeconds(5),
 				Duration.ofSeconds(120));
 		callbacks.listener(connection);
-		BridgeHttpServer server = new BridgeHttpServer(config.bind(), config.port(), broker, hub, 15_000);
+		BridgeHttpServer server = new BridgeHttpServer(config.bind(), config.port(), broker, hub, 15_000, config.orderToken());
+		if (config.orderToken() != null) {
+			log.info("The order routes (/v1/orders) require the bearer token");
+		} else if (config.ordersEnabled()) {
+			log.warn("Orders are enabled and BRIDGE_ORDER_TOKEN_FILE is not set: anything that shares this network namespace can place orders");
+		}
 
 		log.info("broker-bridge starting: IB {}:{} client {}, orders {}, market data type {}", config.ibHost(),
 				config.ibPort(), config.ibClientId(), config.ordersEnabled() ? "ENABLED" : "disabled",

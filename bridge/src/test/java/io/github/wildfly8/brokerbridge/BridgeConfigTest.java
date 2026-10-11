@@ -2,12 +2,16 @@ package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class BridgeConfigTest {
 
@@ -60,6 +64,39 @@ class BridgeConfigTest {
 		assertEquals("0.0.0.0", c.bind());
 		assertEquals(9000, c.port());
 		assertEquals(3, c.marketDataType());
+	}
+
+	@Test
+	void theOrderRoutesHaveNoTokenUnlessOneIsGiven() {
+		assertNull(BridgeConfig.fromEnv(Map.of()).orderToken());
+		assertNull(BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN", "   ")).orderToken());
+		assertNull(BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", " ")).orderToken());
+	}
+
+	@Test
+	void theOrderTokenComesFromTheVariableOrTheFileAndTheFileWins(@TempDir Path dir) throws Exception {
+		assertEquals("0123456789abcdef", BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN", " 0123456789abcdef ")).orderToken());
+		Path file = Files.writeString(dir.resolve("bridge_order_token"), "token-from-the-file-1\n");
+		assertEquals("token-from-the-file-1", BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", file.toString())).orderToken());
+		assertEquals("token-from-the-file-1", BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", file.toString(),
+				"BRIDGE_ORDER_TOKEN", "token-from-the-variable")).orderToken(), "the file wins");
+	}
+
+	@Test
+	void anOrderTokenThatCannotBeUsedFailsTheStartAndNeverQuotesItsValue(@TempDir Path dir) throws Exception {
+		IllegalArgumentException tooShort = assertThrows(IllegalArgumentException.class,
+				() -> BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN", "short-secret")));
+		assertFalse(tooShort.getMessage().contains("short-secret"), tooShort.getMessage());
+		assertTrue(tooShort.getMessage().contains("16"), tooShort.getMessage());
+		Path shortFile = Files.writeString(dir.resolve("short"), "short-secret\n");
+		IllegalArgumentException shortInFile = assertThrows(IllegalArgumentException.class,
+				() -> BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", shortFile.toString())));
+		assertFalse(shortInFile.getMessage().contains("short-secret"), shortInFile.getMessage());
+		Path empty = Files.writeString(dir.resolve("empty"), "\n");
+		assertThrows(IllegalArgumentException.class, () -> BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", empty.toString())));
+		assertThrows(IllegalArgumentException.class,
+				() -> BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", dir.resolve("missing").toString())),
+				"a token file that is named but cannot be read does not start the bridge without the token");
 	}
 
 	@Test

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -37,12 +38,19 @@ final class BridgeHttpServer {
 	private final long heartbeatMs;
 	private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 	private final HttpServer server;
+	/** The bearer token the order routes need, or null for none. */
+	private final byte[] orderToken;
 
 	interface Handler {
 		void handle(HttpExchange ex) throws IOException;
 	}
 
 	BridgeHttpServer(String bind, int port, BrokerService broker, EventHub hub, long heartbeatMs) throws IOException {
+		this(bind, port, broker, hub, heartbeatMs, null);
+	}
+
+	BridgeHttpServer(String bind, int port, BrokerService broker, EventHub hub, long heartbeatMs, String orderToken) throws IOException {
+		this.orderToken = orderToken == null ? null : orderToken.getBytes(StandardCharsets.UTF_8);
 		this.broker = broker;
 		this.hub = hub;
 		this.heartbeatMs = heartbeatMs;
@@ -130,7 +138,27 @@ final class BridgeHttpServer {
 		reply(ex, 200, broker.resolve(read(ex, ResolveRequest.class).instrument()));
 	}
 
+	/**
+	 * The order routes place and cancel orders, which the rest of the API does not: whatever shares the bridge's network namespace
+	 * (the web server, the batch, anything that gets into them) can reach every route, so these need a token that only the engine
+	 * knows when one is configured (DDD review M1). The check comes before the method, the body and the broker.
+	 */
+	private void requireOrderToken(HttpExchange ex) {
+		if (orderToken == null) {
+			return;
+		}
+		String header = ex.getRequestHeaders().getFirst("Authorization");
+		// the scheme is not case-sensitive (RFC 7235); the token is compared in constant time
+		byte[] given = header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)
+				? header.substring(7).trim().getBytes(StandardCharsets.UTF_8) : null;
+		if (given == null || !MessageDigest.isEqual(orderToken, given)) {
+			ex.getResponseHeaders().set("WWW-Authenticate", "Bearer");
+			throw new ApiException(401, "the order routes need the bearer token (BRIDGE_ORDER_TOKEN): nothing was sent to the broker");
+		}
+	}
+
 	private void orders(HttpExchange ex) throws IOException {
+		requireOrderToken(ex);
 		String id = tail(ex, "/v1/orders");
 		if (id == null) {
 			expect(ex, "POST", "/v1/orders");

@@ -1,14 +1,23 @@
 package io.github.wildfly8.brokerbridge;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 /** Bridge settings from environment variables. Invalid values fail startup. */
 /**
  * {@code dataDir} null: order events are kept for replay in memory only (lost on restart). {@code watchdog}: the bridge ends
  * itself when its connection machinery is stuck (see {@link Watchdog}); only {@code BRIDGE_WATCHDOG=off} turns it off.
+ * {@code orderToken}: the bearer token the order routes ({@code /v1/orders}) require, or null for none ({@code BRIDGE_ORDER_TOKEN_FILE},
+ * which wins, or {@code BRIDGE_ORDER_TOKEN}): the rest of the API is open to whatever shares the network namespace, orders are not.
  */
 public record BridgeConfig(String ibHost, int ibPort, int ibClientId, String bind, int port, boolean ordersEnabled,
-		int marketDataType, String dataDir, int replayMax, boolean watchdog) {
+		int marketDataType, String dataDir, int replayMax, boolean watchdog, String orderToken) {
+
+	/** A token shorter than this is a typo, not a secret. */
+	public static final int MIN_ORDER_TOKEN = 16;
 
 	public static BridgeConfig fromEnv(Map<String, String> env) {
 		return new BridgeConfig(
@@ -21,7 +30,31 @@ public record BridgeConfig(String ibHost, int ibPort, int ibClientId, String bin
 				integer(env, "IB_MARKET_DATA_TYPE", 1, 1, 4),
 				env.get("BRIDGE_DATA_DIR") == null || env.get("BRIDGE_DATA_DIR").isBlank() ? null : env.get("BRIDGE_DATA_DIR").trim(),
 				integer(env, "BRIDGE_REPLAY_MAX", 100_000, 1, 10_000_000),
-				!"off".equalsIgnoreCase(text(env, "BRIDGE_WATCHDOG", "on")));
+				!"off".equalsIgnoreCase(text(env, "BRIDGE_WATCHDOG", "on")),
+				orderToken(env));
+	}
+
+	private static String orderToken(Map<String, String> env) {
+		String file = env.get("BRIDGE_ORDER_TOKEN_FILE");
+		String token;
+		if (file != null && !file.isBlank()) {
+			try {
+				token = Files.readString(Path.of(file.trim()), StandardCharsets.UTF_8).trim();
+			} catch (IOException e) {
+				throw new IllegalArgumentException("BRIDGE_ORDER_TOKEN_FILE: cannot read " + file.trim());
+			}
+			if (token.isEmpty()) {
+				throw new IllegalArgumentException("BRIDGE_ORDER_TOKEN_FILE: " + file.trim() + " is empty");
+			}
+		} else {
+			String v = env.get("BRIDGE_ORDER_TOKEN");
+			token = v == null || v.isBlank() ? null : v.trim();
+		}
+		if (token != null && token.length() < MIN_ORDER_TOKEN) {
+			// the value itself never goes into a message
+			throw new IllegalArgumentException("the order token (BRIDGE_ORDER_TOKEN_FILE or BRIDGE_ORDER_TOKEN) needs at least " + MIN_ORDER_TOKEN + " characters");
+		}
+		return token;
 	}
 
 	private static String text(Map<String, String> env, String key, String def) {
