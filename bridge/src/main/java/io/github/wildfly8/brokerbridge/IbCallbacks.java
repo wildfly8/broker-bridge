@@ -43,6 +43,8 @@ class IbCallbacks extends DefaultEWrapper {
 	 * published as errors of their order, with IB's reason.
 	 */
 	private static final Set<Integer> WARNINGS = Set.of(399, 10167, 10197, 2174, 202, 161, 10148);
+	/** The data farms' own status messages: each is a change worth a line. Every other 21xx message may repeat for every request. */
+	private static final Set<Integer> FARM_STATUS = Set.of(2103, 2104, 2105, 2106, 2107, 2108, 2157, 2158);
 	private static final SessionListener NO_LISTENER = new SessionListener() {
 		@Override public void closed() {}
 		@Override public void restored(boolean dataLost) {}
@@ -52,6 +54,8 @@ class IbCallbacks extends DefaultEWrapper {
 	private final EventHub hub;
 	private final boolean ordersEnabled;
 	private volatile SessionListener listener = NO_LISTENER;
+	/** At most one line a minute of each repeating information message (2188 comes with every historical request). */
+	private final RepeatGate repeats = new RepeatGate(60_000, System::currentTimeMillis);
 
 	IbCallbacks(BridgeState state, EventHub hub, boolean ordersEnabled) {
 		this.state = state;
@@ -238,7 +242,10 @@ class IbCallbacks extends DefaultEWrapper {
 		String text = Json.maskAccounts(msg);
 		if (code >= 2100 && code < 2200 && !WARNINGS.contains(code)) {
 			dataFarm(code, text);
-			log.info("IB {}: {}", code, text);
+			int held = FARM_STATUS.contains(code) ? 0 : repeats.admit(code);
+			if (held >= 0) {
+				log.info("IB {}: {}{}", code, text, held > 0 ? " (" + held + " more like it in the last minute)" : "");
+			}
 			return;
 		}
 		switch (code) {
