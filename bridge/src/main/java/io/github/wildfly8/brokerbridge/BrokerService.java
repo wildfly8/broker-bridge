@@ -172,6 +172,12 @@ final class BrokerService {
 			if (ibId < 0) {
 				throw new ApiException(503, "broker has not issued order ids yet", true);
 			}
+			// the id is claimed in one step: of two requests with the same clientOrderId that passed the check above together, one is
+			// refused here (MTS DDD review O14: both used to be placed, two IB orders under one id). The id taken from IB's counter stays
+			// unused, which IB does not mind.
+			if (state.ibIdByClientOrderId.putIfAbsent(clientOrderId, ibId) != null) {
+				throw new ApiException(409, "clientOrderId " + clientOrderId + " already used");
+			}
 		}
 		com.ib.client.Order order = Orders.toIb(r, ibId);
 		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.tag(), r.instrument()));

@@ -210,6 +210,46 @@ class BridgeHttpServerTest {
 		assertEquals(11, state.nextOrderId.get());
 	}
 
+	/**
+	 * MTS DDD review O14: two requests with the same clientOrderId at the same moment (a second client, a retry that overtakes its
+	 * original) must not both reach IB. In 2,000 rounds of the unclaimed check-then-act, 581 placed both.
+	 */
+	@Test
+	void twoRequestsWithTheSameClientOrderIdAtOnceArePlacedOnce() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		BrokerService service = new BrokerService(ib, state, true, hub.eventLog());
+		for (int round = 0; round < 300; round++) {
+			long id = 8000L + round;
+			Model.OrderRequest r = Json.MAPPER.readValue(order(id, false), Model.OrderRequest.class);
+			java.util.concurrent.CyclicBarrier gate = new java.util.concurrent.CyclicBarrier(2);
+			java.util.concurrent.atomic.AtomicInteger accepted = new java.util.concurrent.atomic.AtomicInteger();
+			java.util.concurrent.atomic.AtomicInteger refused = new java.util.concurrent.atomic.AtomicInteger();
+			Runnable go = () -> {
+				try {
+					gate.await();
+					service.placeOrder(r);
+					accepted.incrementAndGet();
+				} catch (ApiException e) {
+					if (e.status() == 409) {
+						refused.incrementAndGet();
+					}
+				} catch (Exception e) {
+					throw new IllegalStateException(e);
+				}
+			};
+			Thread a = new Thread(go);
+			Thread b = new Thread(go);
+			a.start();
+			b.start();
+			a.join();
+			b.join();
+			assertEquals(1, accepted.get(), "round " + round + ": exactly one request is placed");
+			assertEquals(1, refused.get(), "round " + round + ": the other is refused with 409");
+		}
+		assertEquals(300, ib.calls.stream().filter(c -> c.startsWith("placeOrder ")).count(), "one IB order per clientOrderId");
+	}
+
 	@Test
 	void badRequests() throws Exception {
 		start(true, true);

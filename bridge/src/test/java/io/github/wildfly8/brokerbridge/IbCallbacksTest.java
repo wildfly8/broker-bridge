@@ -229,6 +229,21 @@ class IbCallbacksTest {
 	}
 
 	@Test
+	void theAnswerToACancelIsPublishedWithItsReasonButIsNotTheBridgesLastError() throws Exception {
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
+		callbacks.error(7, 0L, 202, "Order Canceled - reason:Your order is not accepted because of insufficient margin", null);
+		callbacks.error(7, 0L, 161, "Cancel attempted when order is not in a cancellable state", null);
+		callbacks.error(7, 0L, 10148, "OrderId 7 that needs to be cancelled can not be cancelled, state: Filled.", null);
+		List<String[]> ev = drain();
+		assertEquals(3, ev.size(), "each is an error event of its order, with IB's words");
+		assertEquals(202, json(ev.get(0)[1]).get("code").asInt());
+		assertTrue(json(ev.get(0)[1]).get("message").asText().contains("insufficient margin"));
+		assertNull(state.status(false).lastError(), "a cancel is no error of the bridge");
+		callbacks.error(7, 0L, 201, "Order rejected - reason:not enough margin", null);
+		assertEquals("201 Order rejected - reason:not enough margin", state.status(false).lastError(), "a rejection still is");
+	}
+
+	@Test
 	void fillsAreDeliveredOnceAndKeptForReplay() throws Exception {
 		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
 		Execution e = new Execution(7, 11, "0002.01", "20261002 10:00:00", "DU1234567", "ARCA", "SLD",

@@ -36,8 +36,13 @@ class IbCallbacks extends DefaultEWrapper {
 	}
 
 	static final int NO_SECURITY = 200;
-	/** Warnings: logged and published, but don't fail a pending request. */
-	private static final Set<Integer> WARNINGS = Set.of(399, 10167, 10197, 2174);
+	/**
+	 * Warnings: logged and published, but don't fail a pending request and are not the bridge's {@code lastError}. 202 ("Order
+	 * Canceled - reason: ..."), 161 and 10148 are IB's plain answer to a cancel: the order's status says the rest, and as the
+	 * bridge's last error they were shown after every cancel and every expiring DAY order (MTS DDD review O16). They are still
+	 * published as errors of their order, with IB's reason.
+	 */
+	private static final Set<Integer> WARNINGS = Set.of(399, 10167, 10197, 2174, 202, 161, 10148);
 	private static final SessionListener NO_LISTENER = new SessionListener() {
 		@Override public void closed() {}
 		@Override public void restored(boolean dataLost) {}
