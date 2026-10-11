@@ -48,6 +48,8 @@ final class BridgeState {
 	private volatile String lastError;
 	private volatile Instant since = Instant.now();
 	private volatile boolean durable;
+	/** IB's own link to the broker's servers (error 1100 lost, 1101 and 1102 restored): the socket to the Gateway can be open while it is down. */
+	private volatile Instant linkDownSince;
 
 	int newRequestId() {
 		return nextRequestId.incrementAndGet();
@@ -63,6 +65,8 @@ final class BridgeState {
 		}
 		connected = up;
 		serverVersion = up ? version : null;
+		// a new session, or none, says nothing about a link that was lost on the old one
+		linkDownSince = null;
 		if (!up) {
 			dataFarms.clear();
 			nextOrderId.set(-1);
@@ -81,6 +85,23 @@ final class BridgeState {
 		dataFarms.put(name, up);
 	}
 
+	/** IB's error 1100 (lost) or 1101 and 1102 (restored): see {@link Model.ConnectionStatus#linkUp}. A second 1100 keeps the first time. */
+	void link(boolean up) {
+		if (up) {
+			linkDownSince = null;
+		} else if (linkDownSince == null) {
+			linkDownSince = Instant.now();
+		}
+	}
+
+	boolean linkUp() {
+		return linkDownSince == null;
+	}
+
+	Instant linkDownSince() {
+		return linkDownSince;
+	}
+
 	/** Whether the order events are journaled on disk ({@link EventLog#durable}); told once, by the service that owns the log. */
 	void durable(boolean durable) {
 		this.durable = durable;
@@ -88,7 +109,7 @@ final class BridgeState {
 
 	ConnectionStatus status(boolean ordersEnabled) {
 		return new ConnectionStatus(connected, serverVersion, accounts, lastError, ordersEnabled, since.toString(),
-				new TreeMap<>(dataFarms), startedAt, durable);
+				new TreeMap<>(dataFarms), startedAt, durable, linkUp());
 	}
 
 	/** Collects one snapshot; completes when the wanted field arrives or at snapshot end. */

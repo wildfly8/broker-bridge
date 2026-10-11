@@ -160,6 +160,7 @@ final class BrokerService {
 		}
 		Contract contract = Contracts.toIb(r.instrument());
 		requireConnected();
+		requireLink("order " + r.clientOrderId());
 		long clientOrderId = r.clientOrderId();
 		int ibId;
 		if (Boolean.TRUE.equals(r.modify())) {
@@ -212,6 +213,7 @@ final class BrokerService {
 	void cancelOrder(long clientOrderId) {
 		requireOrdersEnabled("cancel " + clientOrderId);
 		requireConnected();
+		requireLink("cancel " + clientOrderId);
 		Integer ibId = state.ibIdByClientOrderId.get(clientOrderId);
 		if (ibId == null) {
 			throw new ApiException(404, "unknown clientOrderId " + clientOrderId);
@@ -224,6 +226,20 @@ final class BrokerService {
 		if (!ordersEnabled) {
 			log.warn("Refused {}: BRIDGE_ORDERS_ENABLED is not true", what);
 			throw new ApiException(403, "orders are disabled on the bridge (BRIDGE_ORDERS_ENABLED=false)");
+		}
+	}
+
+	/**
+	 * IB's error 1100 says its link to the broker's servers is lost while the socket to the Gateway stays open, so {@code placeOrder} is
+	 * accepted locally and what IB does with the message is not documented (MTS DDD review O13, 002 T045): nothing is sent, and a cancel
+	 * that cannot be told to have gone out is refused the same way, so that the caller knows and the order is not taken for cancelled.
+	 */
+	private void requireLink(String what) {
+		if (!state.linkUp()) {
+			java.time.Instant since = state.linkDownSince();
+			log.warn("Refused {}: IB's link to the broker's servers has been down since {} (IB 1100)", what, since);
+			throw new ApiException(503, "IB's link to the broker's servers has been down since "
+					+ (since == null ? "?" : since.truncatedTo(java.time.temporal.ChronoUnit.SECONDS)) + " (IB 1100): no " + what.split(" ")[0] + " is sent until it is restored", true);
 		}
 	}
 

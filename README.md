@@ -76,14 +76,14 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 
 | Method | Path | Body → response |
 |---|---|---|
-| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt, durable}` (`startedAt` changes only when the bridge restarts; `durable`: the order events are journaled on disk, so a restart keeps them) |
+| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt, durable, linkUp}` (`startedAt` changes only when the bridge restarts; `durable`: the order events are journaled on disk, so a restart keeps them; `linkUp`: false from IB's error 1100 until 1101 or 1102 or a new connection, because IB's own link to the broker's servers can be lost while the socket to the Gateway stays open; orders, modifications and cancels get a retryable 503 meanwhile) |
 | POST | `/v1/subscriptions` | `{instrument, tag, snapshot, genericTicks}` → `{subscriptionId}` · 503 disconnected |
 | DELETE | `/v1/subscriptions/{id}` | → 204 |
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
 | POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing, with `Retry-After` when the broker named a wait |
 | POST | `/v1/contracts/resolve` | `{instrument}` → `{instrument, marketName, minTick, priceMagnifier, orderTypes, validExchanges}` · 404 none |
-| POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected |
-| DELETE | `/v1/orders/{clientOrderId}` | → 202 · 401 token missing or wrong (when one is configured) · 403 disabled · 404 unknown |
+| POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 (handed to IB's client: not an acknowledgement, the order's `order-status` events are) · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected, or IB's link to its servers is down (`linkUp`) |
+| DELETE | `/v1/orders/{clientOrderId}` | → 202 · 401 token missing or wrong (when one is configured) · 403 disabled · 404 unknown · 503 disconnected, or IB's link to its servers is down |
 | GET | `/v1/events` | `text/event-stream`: `connection`, `quote`, `snapshot-end`, `order-status`, `fill`, `error`; `: heartbeat` every 15 s |
 
 **Instrument**: `{symbol, type: STOCK|OPTION|FUTURE|FUTURE_OPTION|INDEX|FX|COMBO, exchange, primaryExchange, currency,

@@ -226,6 +226,64 @@ class BridgeHttpServerTest {
 		assertEquals(11, state.nextOrderId.get());
 	}
 
+	/**
+	 * MTS DDD review O13 (002 T045): IB's error 1100 says that its link to the broker's servers is lost while the socket to the Gateway stays
+	 * open, {@code placeOrder} is accepted locally and what IB does with the message is not documented: no order, modification or cancel is
+	 * sent until 1101 or 1102, and the answer says why.
+	 */
+	@Test
+	void whileIbsLinkToItsServersIsDownNoOrderModificationOrCancelIsSent() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		assertTrue(json(send("GET", "/v1/status", null)).get("linkUp").asBoolean(), "up unless IB said otherwise");
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+		JsonNode status = json(send("GET", "/v1/status", null));
+		assertFalse(status.get("linkUp").asBoolean(), "the status says so");
+		assertTrue(status.get("connected").asBoolean(), "the socket to the Gateway is open: connected alone cannot tell");
+		long placed = ib.count("placeOrder");
+
+		HttpResponse<String> refused = send("POST", "/v1/orders", order(7002L, false));
+		assertEquals(503, refused.statusCode(), refused.body());
+		assertTrue(json(refused).get("retryable").asBoolean(), "nothing was sent: the caller may try again");
+		String why = json(refused).get("error").asText();
+		assertTrue(why.contains("IB's link to the broker's servers has been down since") && why.contains("(IB 1100)") && why.contains("no order is sent"), why);
+		assertFalse(state.ibIdByClientOrderId.containsKey(7002L), "no client id was claimed");
+		assertEquals(11, state.nextOrderId.get(), "and no broker id was used");
+		assertEquals(503, send("POST", "/v1/orders", order(7001L, true)).statusCode(), "a modification is an order");
+		HttpResponse<String> cancel = send("DELETE", "/v1/orders/7001", null);
+		assertEquals(503, cancel.statusCode(), "a cancel that cannot be told to have gone out is not taken for one");
+		assertTrue(json(cancel).get("error").asText().contains("no cancel is sent"), cancel.body());
+		assertEquals(placed, ib.count("placeOrder"));
+		assertEquals(0, ib.count("cancelOrder"));
+		assertEquals(200, send("POST", "/v1/subscriptions", "{\"instrument\":" + SPY + ",\"tag\":\"2\"}").statusCode(), "quotes are not orders");
+
+		callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+		callbacks.error(-1, 0L, 1102, "Connectivity between IB and TWS has been restored- data maintained.", null);
+		assertTrue(json(send("GET", "/v1/status", null)).get("linkUp").asBoolean());
+		assertEquals(202, send("POST", "/v1/orders", order(7002L, false)).statusCode());
+		assertEquals(202, send("DELETE", "/v1/orders/7001", null).statusCode());
+		assertTrue(ib.calls.contains("cancelOrder 10"));
+	}
+
+	@Test
+	void aNewSessionAndErrorsOfOtherKindsDoNotLeaveTheLinkDownOrBringItDown() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+		assertEquals(503, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		state.connected(false, null);
+		state.connected(true, 222);
+		state.nextOrderId.set(10);
+		ib.connected = true;
+		assertTrue(state.linkUp(), "a new session says nothing about a link lost on the old one");
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		callbacks.error(-1, 0L, 2110, "Connectivity between TWS and server is broken. It will be restored automatically.", null);
+		callbacks.error(-1, 0L, 2105, "HMDS data farm connection is broken:ushmds", null);
+		assertTrue(state.linkUp(), "only 1100 takes the link down; the data farms have their own report");
+		assertEquals(202, send("DELETE", "/v1/orders/7001", null).statusCode());
+	}
+
 	private static final String TOKEN = "an-order-token-of-24-chars";
 
 	/**

@@ -262,11 +262,13 @@ class IbCallbacks extends DefaultEWrapper {
 			case 1100 -> {
 				log.warn("IB 1100: {}", text);
 				state.lastError(code + " " + text);
+				state.link(false);
 				hub.publish("connection", state.status(ordersEnabled));
 				return;
 			}
 			case 1101, 1102 -> {
 				log.info("IB {}: {}", code, text);
+				state.link(true);
 				listener.restored(code == 1101);
 				hub.publish("connection", state.status(ordersEnabled));
 				return;

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
@@ -262,6 +263,19 @@ class IbCallbacksTest {
 	}
 
 	@Test
+	void aSecond1100KeepsTheTimeOfTheFirstAndAnyRestoreEndsIt() {
+		state.link(false);
+		java.time.Instant first = state.linkDownSince();
+		state.link(false);
+		assertSame(first, state.linkDownSince(), "the link has been down since the first report");
+		state.link(true);
+		assertTrue(state.linkUp());
+		assertNull(state.linkDownSince());
+		state.link(true);
+		assertTrue(state.linkUp(), "a restore without a loss is nothing");
+	}
+
+	@Test
 	void sessionEvents() throws Exception {
 		AtomicBoolean closed = new AtomicBoolean();
 		AtomicBoolean dataLost = new AtomicBoolean();
@@ -280,8 +294,14 @@ class IbCallbacksTest {
 		assertEquals("DU*****67", status.accounts());
 		assertEquals(Boolean.TRUE, status.dataFarms().get("usfarm"));
 		assertEquals(Boolean.FALSE, status.dataFarms().get("ushmds"));
+		assertTrue(status.linkUp(), "up unless IB said otherwise");
+		callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+		assertFalse(state.status(false).linkUp(), "IB's own link to the broker's servers is lost though the socket is open");
+		assertTrue(state.status(false).connected());
+		assertEquals("1100 Connectivity between IBKR and Trader Workstation has been lost.", state.status(false).lastError());
 		callbacks.error(-1, 0L, 1101, "Connectivity between IB and TWS has been restored- data lost.", null);
 		assertTrue(dataLost.get());
+		assertTrue(state.status(false).linkUp());
 
 		BridgeState.Snapshot pending = new BridgeState.Snapshot(1);
 		state.snapshots.put(5, pending);
