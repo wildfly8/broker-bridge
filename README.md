@@ -101,8 +101,9 @@ are kept and, with `BRIDGE_DATA_DIR`, journaled to disk (fsync per event). Recon
 standard `Last-Event-ID: <id>` header (or `/v1/events?lastEventId=<id>`) to get every kept order
 event after that id, in order, followed by live events, with no gap or repeat in between. Quotes
 are not replayed. If the id is older than what was kept you first get
-`event: replay-truncated` `{after, oldestKept}`: also when the journal is new or was lost with its volume (the
-bridge cannot know what happened before it), and for the first start on an empty volume. A restart that finds its
+`event: replay-truncated` `{after, oldestKept}` (`oldestKept` is the id of the first event the bridge still keeps, or the id
+its next event will get when it keeps none, so the newest event it no longer has is `oldestKept - 1`): also when the journal is
+new or was lost with its volume (the bridge cannot know what happened before it), and for the first start on an empty volume. A restart that finds its
 journal keeps the horizon the journal recorded and invents none. After those replayed order events (and when there is
 nothing to replay) the bridge sends one `event: replay-complete` with id 0, `{replayed, after}` (`after` only when the
 client asked to resume). It is not journaled. On every broker connection the bridge also asks
