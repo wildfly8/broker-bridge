@@ -62,7 +62,7 @@ public final class BridgeMain {
 		}
 
 		log.info("broker-bridge starting: IB {}:{} client {}, orders {}, market data type {}", config.ibHost(),
-				config.ibPort(), config.ibClientId(), config.ordersEnabled() ? "ENABLED" : "disabled",
+				config.ibPort(), config.ibClientId(), config.ordersEnabled() ? "ENABLED" : "disabled (new orders and modifications are refused; a cancel is taken)",
 				config.marketDataType());
 		server.start();
 		connection.start();

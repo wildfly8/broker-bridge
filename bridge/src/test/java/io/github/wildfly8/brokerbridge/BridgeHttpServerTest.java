@@ -196,15 +196,46 @@ class BridgeHttpServerTest {
 	}
 
 	@Test
-	void ordersRefusedWhenDisabled() throws Exception {
+	void aNewOrderAndAModificationAreRefusedWhenOrdersAreDisabled() throws Exception {
 		start(false, true);
 		state.nextOrderId.set(10);
 		HttpResponse<String> r = send("POST", "/v1/orders", order(7001L, false));
 		assertEquals(403, r.statusCode());
 		assertTrue(json(r).get("error").asText().contains("BRIDGE_ORDERS_ENABLED"));
-		assertEquals(403, send("DELETE", "/v1/orders/7001", null).statusCode());
+		assertEquals(403, send("POST", "/v1/orders", order(7001L, true)).statusCode(), "a modification is an order too");
 		assertEquals(0, ib.count("placeOrder"));
+	}
+
+	/**
+	 * A cancel is orthogonal to order enablement: it only reduces risk. An order placed before the switch was turned off
+	 * is known again from the journal after the restart that turned it off, and can be cancelled; an id the bridge does not know is a 404, not
+	 * a 403; and the other conditions of a cancel (the token, the connection to IB) still apply.
+	 */
+	@Test
+	void aCancelPassesWhenOrdersAreDisabled() throws Exception {
+		EventLog journal = EventLog.inMemory(1000, System.currentTimeMillis());
+		journal.recordOrder(new EventLog.OrderRecord(7001L, 10, "4", Model.Instrument.stock("SPY", "SMART", "USD")));
+		start(false, true, null, journal);
+		assertEquals(202, send("DELETE", "/v1/orders/7001", null).statusCode());
+		assertTrue(ib.calls.contains("cancelOrder 10"));
+		assertEquals(404, send("DELETE", "/v1/orders/9999", null).statusCode(), "an unknown id is not a refusal of the switch");
+		assertEquals(1, ib.count("cancelOrder"));
+		assertEquals(403, send("POST", "/v1/orders", order(7002L, false)).statusCode(), "the switch still keeps new orders out");
+	}
+
+	@Test
+	void aCancelWithOrdersDisabledStillNeedsTheTokenAndTheConnection() throws Exception {
+		EventLog journal = EventLog.inMemory(1000, System.currentTimeMillis());
+		journal.recordOrder(new EventLog.OrderRecord(7001L, 10, "4", Model.Instrument.stock("SPY", "SMART", "USD")));
+		start(false, true, TOKEN, journal);
+		assertEquals(401, send("DELETE", "/v1/orders/7001", null).statusCode());
 		assertEquals(0, ib.count("cancelOrder"));
+		assertEquals(202, send("DELETE", "/v1/orders/7001", null, "Bearer " + TOKEN).statusCode());
+		assertEquals(1, ib.count("cancelOrder"));
+		ib.connected = false;
+		state.connected(false, null);
+		assertEquals(503, send("DELETE", "/v1/orders/7001", null, "Bearer " + TOKEN).statusCode(), "no connection to IB, nothing is sent");
+		assertEquals(1, ib.count("cancelOrder"));
 	}
 
 	@Test

@@ -210,8 +210,12 @@ final class BrokerService {
 		return clientOrderId;
 	}
 
+	/**
+	 * A cancel is not an order: it only reduces risk, so {@code BRIDGE_ORDERS_ENABLED} does not hold it back (it keeps the new order and the
+	 * modification out). What it needs to reach IB stays: a connection, IB's link to its servers, and an order the bridge knows (an order
+	 * placed before the switch was turned off is known again from the journal after a restart).
+	 */
 	void cancelOrder(long clientOrderId) {
-		requireOrdersEnabled("cancel " + clientOrderId);
 		requireConnected();
 		requireLink("cancel " + clientOrderId);
 		Integer ibId = state.ibIdByClientOrderId.get(clientOrderId);

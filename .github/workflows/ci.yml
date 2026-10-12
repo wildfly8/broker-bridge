@@ -2,9 +2,9 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # No push or pull_request trigger: the hosted-runner minutes of this account are used up, so this is run by hand. The test step is
+  # `mvn -B verify`, which anyone can run; the image is built, started and probed where it is deployed.
+  workflow_dispatch:
 
 permissions:
   contents: read

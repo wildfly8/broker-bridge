@@ -28,7 +28,7 @@ message layout appears in a request, a response or an event.
   `third_party/ib-tws-api`, is GPLv3, which is why it lives in this separate program
   rather than inside any caller.
 - **Runtime**: JDK 25; HTTP requests and broker message dispatch run on virtual threads.
-- **Safety**: binds to `127.0.0.1`; order placement is **refused** unless `BRIDGE_ORDERS_ENABLED=true`; and when
+- **Safety**: binds to `127.0.0.1`; a new order and a modification are **refused** unless `BRIDGE_ORDERS_ENABLED=true` (a cancel only reduces risk and is taken either way); and when
   `BRIDGE_ORDER_TOKEN_FILE` (or `BRIDGE_ORDER_TOKEN`) is set, `POST`/`DELETE /v1/orders` need that token as a
   bearer token, so a caller that shares the network namespace but not the secret cannot place or cancel an order.
 - Not affiliated with or endorsed by Interactive Brokers. "Interactive Brokers", "IBKR",
@@ -54,7 +54,7 @@ Bridge settings, independent of the broker:
 | Variable | Default | |
 |---|---|---|
 | `BRIDGE_BIND` / `BRIDGE_PORT` | `127.0.0.1` / `8090` | API listen address; the API has **no authentication** except the order routes below |
-| `BRIDGE_ORDERS_ENABLED` | `false` | only `true` (any case) lets orders through; `1` and `yes` do not |
+| `BRIDGE_ORDERS_ENABLED` | `false` | only `true` (any case) lets new orders and modifications through; `1` and `yes` do not. A cancel does not need it |
 | `BRIDGE_ORDER_TOKEN_FILE` / `BRIDGE_ORDER_TOKEN` | unset | the bearer token the order routes (`/v1/orders`) require (`Authorization: Bearer <token>`, otherwise 401 `WWW-Authenticate: Bearer` before anything reaches the broker); the file wins; at least 16 characters, an unusable value stops the start and is never quoted (a file the container's user `bridge` cannot read is unusable: give the container the file's group, `group_add` in compose); unset: the order routes are open like the others (and a start with orders enabled says so as a warning) |
 | `BRIDGE_DATA_DIR` | unset (image: `/data`) | journal of order events and order ids, so replay survives a restart |
 | `BRIDGE_REPLAY_MAX` | `100000` | order events kept for replay |
@@ -83,7 +83,7 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 | POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing, with `Retry-After` when the broker named a wait |
 | POST | `/v1/contracts/resolve` | `{instrument}` → `{instrument, marketName, minTick, priceMagnifier, orderTypes, validExchanges}` · 404 none |
 | POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 (handed to IB's client: not an acknowledgement, the order's `order-status` events are) · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected, or IB's link to its servers is down (`linkUp`) |
-| DELETE | `/v1/orders/{clientOrderId}` | → 202 · 401 token missing or wrong (when one is configured) · 403 disabled · 404 unknown · 503 disconnected, or IB's link to its servers is down |
+| DELETE | `/v1/orders/{clientOrderId}` | → 202 (also with `BRIDGE_ORDERS_ENABLED=false`: a cancel is not an order) · 401 token missing or wrong (when one is configured) · 404 unknown · 503 disconnected, or IB's link to its servers is down |
 | GET | `/v1/events` | `text/event-stream`: `connection`, `quote`, `snapshot-end`, `order-status`, `fill`, `error`; `: heartbeat` every 15 s |
 
 **Instrument**: `{symbol, type: STOCK|OPTION|FUTURE|FUTURE_OPTION|INDEX|FX|COMBO, exchange, primaryExchange, currency,
