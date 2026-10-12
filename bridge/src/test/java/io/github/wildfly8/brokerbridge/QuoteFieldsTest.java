@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The names the bridge reports in {@code field} for the broker's numeric codes (IB tick types). A client keeps its own table of the
- * same numbers; the literal list below is pinned on both sides (MTS: {@code QuoteFieldTest}). Change it in both repositories, or neither.
+ * same numbers and pins the same literal list in its own tests. Change the list on both sides, or neither.
  */
 class QuoteFieldsTest {
 

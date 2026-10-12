@@ -27,7 +27,7 @@ class EventHubTest {
 		assertFalse(hub.next(c, 10).kept(), "a heartbeat is no order event");
 	}
 
-	/** MTS DDD review O15 (002 T046): a connection event published between the registration and the replay's read was dropped. */
+	/** A connection event published between the registration and the replay's read was dropped. */
 	@Test
 	void aLiveFrameIsSkippedAfterAResumeOnlyWhenTheReplayHasSentIt() {
 		long replayedUpTo = 100;

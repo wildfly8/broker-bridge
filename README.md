@@ -46,7 +46,7 @@ docker build -t broker-bridge .              # or as a container
 docker run --rm --network host broker-bridge
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) builds and tests on every push and pull request (`mvn -B verify`, 61 tests) and
+GitHub Actions (`.github/workflows/ci.yml`) builds and tests on every push and pull request (`mvn -B verify`: all the unit tests under `bridge/src/test`, whatever their number) and
 then builds the image, starts it without a Gateway and checks that `/v1/status` answers with orders refused.
 
 Bridge settings, independent of the broker:

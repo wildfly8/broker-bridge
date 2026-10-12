@@ -95,22 +95,22 @@ class BridgeConfigTest {
 		Path empty = Files.writeString(dir.resolve("empty"), "\n");
 		IllegalArgumentException emptyFile = assertThrows(IllegalArgumentException.class, () -> BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", empty.toString())));
 		assertTrue(emptyFile.getMessage().contains("is empty") && emptyFile.getMessage().contains(empty.toString()), emptyFile.getMessage());
-		assertSurvivesTheVmMasking(emptyFile.getMessage());
+		assertSurvivesALogMask(emptyFile.getMessage());
 		IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,
 				() -> BridgeConfig.fromEnv(Map.of("BRIDGE_ORDER_TOKEN_FILE", dir.resolve("missing").toString())),
 				"a token file that is named but cannot be read does not start the bridge without the token");
 		assertTrue(missing.getMessage().contains("cannot be read") && missing.getMessage().contains(dir.resolve("missing").toString()), missing.getMessage());
-		assertSurvivesTheVmMasking(missing.getMessage());
-		assertSurvivesTheVmMasking(tooShort.getMessage());
+		assertSurvivesALogMask(missing.getMessage());
+		assertSurvivesALogMask(tooShort.getMessage());
 	}
 
 	/**
-	 * The VM's masking (infra/vm/mask.sh in mts-cloud) hides what follows a name with "token" in it and a colon or an equals sign: the first
-	 * roll-out of the order token printed "BRIDGE_ORDER_TOKEN_FILE: cannot read ..." as "<masked> read ..." and the cause was gone from the log.
+	 * A log filter that masks secrets hides what follows a name with "token" in it and a colon or an equals sign: the first roll-out of the
+	 * order token printed "BRIDGE_ORDER_TOKEN_FILE: cannot read ..." as "<masked> read ..." and the cause was gone from the log.
 	 */
-	private static void assertSurvivesTheVmMasking(String message) {
+	private static void assertSurvivesALogMask(String message) {
 		assertFalse(java.util.regex.Pattern.compile("[A-Za-z0-9_.-]*(?i:token|secret|passw(or)?d)[A-Za-z0-9_.-]*\"?[ ]*[=:]").matcher(message).find(),
-				"a message the VM's masking would cut: " + message);
+				"a message a log mask would cut: " + message);
 	}
 
 	@Test

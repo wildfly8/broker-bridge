@@ -38,7 +38,7 @@ final class EventLog implements AutoCloseable {
 	private static final int MAX_ORDERS = 10_000;
 	/**
 	 * The most order records kept when none of the oldest has ended: the record of an order that has not ended is never dropped for age
-	 * (a GTC order can work for weeks, and its events are dropped as foreign once its record is gone: MTS DDD review O12, 002 T044), only
+	 * (a GTC order can work for weeks, and its events are dropped as foreign once its record is gone), only
 	 * for this many.
 	 */
 	private static final int MAX_ORDERS_OPEN = 100_000;
@@ -131,8 +131,7 @@ final class EventLog implements AutoCloseable {
 		if (!headed) {
 			// A journal that is new, or lost with its volume (or damaged to nothing), holds nothing from before this process: a client that
 			// resumes with an older cursor must be told that order events may be missing, as it is when there is no journal at all. Every
-			// journal this class has written starts with a header line, so a normal restart keeps the horizon the header recorded (MTS DDD
-			// review C2, 002 T037).
+			// journal this class has written starts with a header line, so a normal restart keeps the horizon the header recorded.
 			l.horizon = Math.max(l.horizon, l.nextId - 1);
 			log.warn("Journal {} is new or lost: order events from before id {} are not available to a client that resumes", l.journal, l.nextId);
 		}

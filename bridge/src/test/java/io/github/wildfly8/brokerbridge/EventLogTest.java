@@ -64,7 +64,7 @@ class EventLogTest {
 		}
 	}
 
-	/** MTS DDD review C2 (002 T037): a client's cursor outlives the bridge's volume; the bridge must say that order events may be missing. */
+	/** A client's cursor outlives the bridge's volume; the bridge must say that order events may be missing. */
 	@Test
 	void aNewOrLostJournalAnnouncesThatEarlierEventsMayBeMissing() throws Exception {
 		long oldCursor;
@@ -72,7 +72,7 @@ class EventLogTest {
 			oldCursor = first.nextId();
 			first.keepOrderEvent(oldCursor, "fill", Map.of("clientOrderId", 7001, "fillId", "0001.01"));
 		}
-		// the volume is lost, the client (MTS) keeps its cursor
+		// the volume is lost, the client keeps its cursor
 		Files.delete(dir.resolve("journal.jsonl"));
 		try (EventLog lost = EventLog.open(dir, 100, 9_000L)) {
 			assertTrue(lost.truncatedAfter(oldCursor), "events after the client's cursor existed and are gone");
@@ -141,7 +141,7 @@ class EventLogTest {
 		return log.orders().stream().map(EventLog.OrderRecord::clientOrderId).toList();
 	}
 
-	/** MTS DDD review O12 (002 T044 b): a GTC order can work for weeks; the newest 10,000 records were all that survived. */
+	/** A GTC order can work for weeks; the newest 10,000 records were all that survived. */
 	@Test
 	void theRecordOfAnOrderThatHasNotEndedIsKeptWhileEndedOnesGoOldestFirst() {
 		EventLog log = EventLog.inMemory(1_000, 1_000_000L, 5, 20);

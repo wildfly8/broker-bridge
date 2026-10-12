@@ -227,7 +227,7 @@ class BridgeHttpServerTest {
 	}
 
 	/**
-	 * MTS DDD review O13 (002 T045): IB's error 1100 says that its link to the broker's servers is lost while the socket to the Gateway stays
+	 * IB's error 1100 says that its link to the broker's servers is lost while the socket to the Gateway stays
 	 * open, {@code placeOrder} is accepted locally and what IB does with the message is not documented: no order, modification or cancel is
 	 * sent until 1101 or 1102, and the answer says why.
 	 */
@@ -287,7 +287,7 @@ class BridgeHttpServerTest {
 	private static final String TOKEN = "an-order-token-of-24-chars";
 
 	/**
-	 * MTS DDD review M1: the web server, the batch and whatever else shares the bridge's network namespace reach every route; with
+	 * The web server, the batch and whatever else shares the bridge's network namespace reach every route; with
 	 * a token configured only a request that carries it places or cancels an order, and nothing reaches the broker without it.
 	 */
 	@Test
@@ -352,7 +352,7 @@ class BridgeHttpServerTest {
 	}
 
 	/**
-	 * MTS DDD review O14: two requests with the same clientOrderId at the same moment (a second client, a retry that overtakes its
+	 * Two requests with the same clientOrderId at the same moment (a second client, a retry that overtakes its
 	 * original) must not both reach IB. In 2,000 rounds of the unclaimed check-then-act, 581 placed both.
 	 */
 	@Test
@@ -513,7 +513,7 @@ class BridgeHttpServerTest {
 		assertEquals(400, openEvents("", "abc").statusCode());
 	}
 
-	/** MTS DDD review C2 (002 T037): the cursor of a client outlives the volume of the bridge. */
+	/** The cursor of a client outlives the volume of the bridge. */
 	@Test
 	void aClientWithAnOlderCursorThanAFreshDurableJournalIsToldThatEventsMayBeMissing(@TempDir java.nio.file.Path dir) throws Exception {
 		start(false, true, null, EventLog.open(dir, 1000, System.currentTimeMillis()));
@@ -527,7 +527,7 @@ class BridgeHttpServerTest {
 		}
 	}
 
-	/** MTS DDD review O12 (002 T044 c). */
+	/** The status says whether the order events are journaled, so a client knows whether a restart of the bridge keeps them. */
 	@Test
 	void statusSaysWhetherTheOrderEventsAreJournaled(@TempDir java.nio.file.Path dir) throws Exception {
 		start(false, true);
@@ -542,7 +542,7 @@ class BridgeHttpServerTest {
 	}
 
 	/**
-	 * MTS DDD review O12 (002 T044 a): IB's counter can come back lower than the ids this bridge has used (the Gateway's "Reset API order ID
+	 * IB's counter can come back lower than the ids this bridge has used (the Gateway's "Reset API order ID
 	 * sequence", a lost settings volume); the new order must not take an id that belongs to an old order, whose statuses and fills would then
 	 * be booked on it.
 	 */

@@ -108,7 +108,7 @@ final class EventHub {
 	 * Whether a live frame of a client that resumed was already sent in its replay: only an order event with an id at or below the last
 	 * replayed one is. A quote or a {@code connection} event published between the client's registration and the replay's read has an
 	 * id below the last replayed order event too, and is not in the replay: skipping it kept a stale connected flag at the client until
-	 * the next one (MTS DDD review O15, 002 T046).
+	 * the next one.
 	 */
 	static boolean alreadyReplayed(Frame f, long replayedUpTo) {
 		return f.kept() && f.id() != 0 && f.id() <= replayedUpTo;

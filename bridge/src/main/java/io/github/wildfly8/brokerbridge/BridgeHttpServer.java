@@ -140,8 +140,8 @@ final class BridgeHttpServer {
 
 	/**
 	 * The order routes place and cancel orders, which the rest of the API does not: whatever shares the bridge's network namespace
-	 * (the web server, the batch, anything that gets into them) can reach every route, so these need a token that only the engine
-	 * knows when one is configured (DDD review M1). The check comes before the method, the body and the broker.
+	 * (the web server, the batch, anything that gets into them) can reach every route, so these need a token that only the client
+	 * that places orders knows when one is configured. The check comes before the method, the body and the broker.
 	 */
 	private void requireOrderToken(HttpExchange ex) {
 		if (orderToken == null) {

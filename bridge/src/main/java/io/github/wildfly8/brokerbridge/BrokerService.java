@@ -173,7 +173,7 @@ final class BrokerService {
 			if (state.ibIdByClientOrderId.containsKey(clientOrderId)) {
 				throw new ApiException(409, "clientOrderId " + clientOrderId + " already used");
 			}
-			// a broker id that already belongs to another order is never reused (MTS DDD review O12): IB's counter can come back lower than
+			// a broker id that already belongs to another order is never reused: IB's counter can come back lower than
 			// the ids this bridge has used, and the old order's statuses and fills would be booked on the new one. The floor keeps the counter
 			// above the journal; this claim keeps it off any id that is taken anyway. The ids skipped stay unused, which IB does not mind.
 			OrderRef ref = new OrderRef(clientOrderId, r.tag(), r.instrument());
@@ -191,7 +191,7 @@ final class BrokerService {
 				}
 			}
 			// the client id is claimed in one step: of two requests with the same clientOrderId that passed the check above together, one is
-			// refused here (MTS DDD review O14: both used to be placed, two IB orders under one id)
+			// refused here (both used to be placed: two IB orders under one id)
 			if (state.ibIdByClientOrderId.putIfAbsent(clientOrderId, ibId) != null) {
 				state.ordersByIbId.remove(ibId, ref);
 				throw new ApiException(409, "clientOrderId " + clientOrderId + " already used");
@@ -231,7 +231,7 @@ final class BrokerService {
 
 	/**
 	 * IB's error 1100 says its link to the broker's servers is lost while the socket to the Gateway stays open, so {@code placeOrder} is
-	 * accepted locally and what IB does with the message is not documented (MTS DDD review O13, 002 T045): nothing is sent, and a cancel
+	 * accepted locally and what IB does with the message is not documented: nothing is sent, and a cancel
 	 * that cannot be told to have gone out is refused the same way, so that the caller knows and the order is not taken for cancelled.
 	 */
 	private void requireLink(String what) {

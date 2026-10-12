@@ -34,7 +34,7 @@ final class BridgeState {
 	/**
 	 * Above every broker order id the journal and this run have used. IB's own counter can come back lower (the Gateway's "Reset API order ID
 	 * sequence", a lost settings volume), and an id the journal knows belongs to another order whose fills and statuses would then be booked
-	 * on the new one (MTS DDD review O12, 002 T044): the counter is never below this.
+	 * on the new one: the counter is never below this.
 	 */
 	final AtomicInteger orderIdFloor = new AtomicInteger(0);
 	final Map<Integer, OrderRef> ordersByIbId = new ConcurrentHashMap<>();

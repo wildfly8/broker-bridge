@@ -57,9 +57,9 @@ public final class Model {
 	/**
 	 * {@code dataFarms}: broker data-farm name → connected (e.g. usfarm, usopt, ushmds). {@code startedAt} changes
 	 * only when the bridge restarts, so a client can tell its subscriptions are gone. {@code durable}: the order events are journaled on
-	 * disk ({@code BRIDGE_DATA_DIR}), so a restart of the bridge keeps them; false, they are lost with it (MTS DDD review O12, 002 T044).
+	 * disk ({@code BRIDGE_DATA_DIR}), so a restart of the bridge keeps them; false, they are lost with it.
 	 * {@code linkUp}: false from IB's error 1100 (its connection to the broker's servers is lost, the socket to the bridge stays open) until
-	 * 1101 or 1102 or a new connection; orders, modifications and cancels are refused meanwhile (MTS DDD review O13, 002 T045).
+	 * 1101 or 1102 or a new connection; orders, modifications and cancels are refused meanwhile.
 	 */
 	public record ConnectionStatus(boolean connected, Integer serverVersion, String accounts, String lastError,
 			boolean ordersEnabled, String since, Map<String, Boolean> dataFarms, String startedAt, boolean durable, boolean linkUp) {}
