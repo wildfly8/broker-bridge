@@ -51,7 +51,7 @@ final class Contracts {
 				default -> throw new ApiException(400, "unsupported right: " + in.right());
 			});
 		}
-		c.multiplier(in.multiplier());
+		c.multiplier(multiplier(in.multiplier()));
 		if (in.legs() != null && !in.legs().isEmpty()) {
 			List<ComboLeg> legs = new ArrayList<>();
 			for (Leg leg : in.legs()) {
@@ -65,6 +65,26 @@ final class Contracts {
 			c.comboLegs(legs);
 		}
 		return c;
+	}
+
+	/**
+	 * The multiplier goes to IB's client as text and is parsed there, when the order is encoded; a text that is no number made that client close
+	 * the session ("Order Sending Error", the connection lost for every client) after the order had been accepted with a 202. It is refused here.
+	 */
+	private static String multiplier(String text) {
+		if (text == null || text.isBlank()) {
+			return null;
+		}
+		double value;
+		try {
+			value = Double.parseDouble(text.trim());
+		} catch (NumberFormatException e) {
+			throw new ApiException(400, "multiplier is not a number: " + text);
+		}
+		if (!(value > 0) || Double.isInfinite(value)) {
+			throw new ApiException(400, "multiplier must be a positive number: " + text);
+		}
+		return text.trim();
 	}
 
 	static Instrument fromIb(Contract c) {

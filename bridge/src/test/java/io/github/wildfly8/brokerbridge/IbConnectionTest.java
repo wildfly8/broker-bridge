@@ -106,7 +106,7 @@ class IbConnectionTest {
 		EventHub.Client events = hub.register();
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
-		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z"));
+		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), java.time.Instant.now().toString()));
 		hub.eventLog().keepOrderEvent(hub.eventLog().nextId(), "order-status", java.util.Map.of("clientOrderId", 7001, "status", "Submitted"));
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
 		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
@@ -149,8 +149,8 @@ class IbConnectionTest {
 		EventHub.Client events = hub.register();
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
-		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z"));
-		hub.eventLog().recordOrder(new EventLog.OrderRecord(7002, 11, "3", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z"));
+		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), java.time.Instant.now().toString()));
+		hub.eventLog().recordOrder(new EventLog.OrderRecord(7002, 11, "3", Instrument.stock("SPY", "SMART", "USD"), java.time.Instant.now().toString()));
 		// from before the placement time was kept, and no status among the kept events: not concluded to have ended
 		hub.eventLog().recordOrder(new EventLog.OrderRecord(7003, 12, "3", Instrument.stock("SPY", "SMART", "USD")));
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
@@ -184,7 +184,7 @@ class IbConnectionTest {
 		EventHub.Client events = hub.register();
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
-		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z"));
+		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), java.time.Instant.now().toString()));
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
 		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80), 100, 20);
 		callbacks.listener(conn);
@@ -207,7 +207,7 @@ class IbConnectionTest {
 		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
-		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z"));
+		hub.eventLog().recordOrder(new EventLog.OrderRecord(7001, 10, "3", Instrument.stock("SPY", "SMART", "USD"), java.time.Instant.now().toString()));
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
 		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80), 60_000, 60_000);
 		callbacks.listener(conn);
@@ -301,6 +301,7 @@ class IbConnectionTest {
 			callbacks.completedOrdersEnd();
 		};
 
+		EventHub.Client events = hub.register();
 		conn.start();
 		try {
 			waitFor(() -> versionAsked.get() >= 2);
@@ -309,6 +310,145 @@ class IbConnectionTest {
 			assertTrue(ib.isConnected());
 			assertEquals(1, ib.connectAttempts, "a marked-up session is not reconnected");
 			assertEquals(0, ib.count("disconnect"));
+			assertTrue(drainUntilConnected(hub, events).contains("\"connected\":true"), "and its clients were told, before the line of the log that failed");
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** IB's client fails in the same way at every call a setup makes; whichever it is, the socket is closed and the next attempt connects. */
+	private static class FailOnce extends FakeIbClient {
+		final String point;
+		final java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
+
+		FailOnce(String point) {
+			this.point = point;
+		}
+
+		private void maybe(String at) {
+			if (at.equals(point) && failed.compareAndSet(false, true)) {
+				throw new IllegalStateException("fails at " + at);
+			}
+		}
+
+		@Override public void reqMarketDataType(int type) { maybe("reqMarketDataType"); super.reqMarketDataType(type); }
+		@Override public void reqIds() { maybe("reqIds"); super.reqIds(); }
+		@Override public void reqOpenOrders() { maybe("reqOpenOrders"); super.reqOpenOrders(); }
+		@Override public void reqCompletedOrders(boolean apiOnly) { maybe("reqCompletedOrders"); super.reqCompletedOrders(apiOnly); }
+		@Override public void reqExecutions(int reqId, int clientId) { maybe("reqExecutions"); super.reqExecutions(reqId, clientId); }
+		@Override public int serverVersion() { maybe("serverVersion"); return super.serverVersion(); }
+	}
+
+	/**
+	 * The failure of one call after the handshake is not the only one: the setup asks IB for the market-data type, the order ids, the open and the
+	 * completed orders and the executions, and marks the session up with the server version. A socket that stays open at any of them is never tried
+	 * again, and a client that reports the closing of the socket to its callbacks, as IB's does, must not make the loop forget its own state.
+	 */
+	@Test
+	void aFailureAtAnyPointOfTheSetupClosesTheSocketAndTheNextAttemptConnects() throws Exception {
+		for (String point : new String[] { "reqMarketDataType", "reqIds", "reqOpenOrders", "reqCompletedOrders", "reqExecutions", "serverVersion" }) {
+			BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+			BridgeState state = new BridgeState();
+			EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+			FailOnce ib = new FailOnce(point);
+			IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+			BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+			IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+			callbacks.listener(conn);
+			ib.onDisconnect = callbacks::connectionClosed;
+			ib.onOpenOrders = () -> {
+				callbacks.openOrderEnd();
+				callbacks.completedOrdersEnd();
+			};
+
+			conn.start();
+			try {
+				waitFor(() -> ib.calls.contains("disconnect"));
+				assertFalse(ib.isConnected(), "the socket is closed after a failure at " + point);
+				assertFalse(state.connected(), point);
+				assertNull(state.sync, "no reading is left armed: " + point);
+				assertEquals(1, ib.connectAttempts, "the next attempt waits the backoff: " + point);
+				waitFor(state::connected);
+				assertEquals(2, ib.connectAttempts, point);
+				assertTrue(ib.isConnected(), point);
+			} finally {
+				conn.stop();
+			}
+		}
+	}
+
+	/** A client that cannot say whether its socket is open is taken for open: closing a socket that is not open does no harm, leaving one open does. */
+	@Test
+	void aClientThatCannotSayWhetherItsSocketIsOpenIsClosedAfterAFailure() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		java.util.concurrent.atomic.AtomicBoolean cannotSay = new java.util.concurrent.atomic.AtomicBoolean();
+		FakeIbClient ib = new FakeIbClient() {
+			@Override
+			public boolean isConnected() {
+				if (cannotSay.compareAndSet(true, false)) {
+					throw new IllegalStateException("the client cannot say");
+				}
+				return super.isConnected();
+			}
+		};
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+		callbacks.listener(conn);
+		java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+		ib.onOpenOrders = () -> {
+			if (asked.incrementAndGet() == 1) {
+				cannotSay.set(true);
+				throw new IllegalStateException("the first reading fails");
+			}
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(() -> ib.calls.contains("disconnect"));
+			assertFalse(ib.isConnected());
+			waitFor(state::connected);
+			assertEquals(2, ib.connectAttempts);
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** What goes wrong while the failure is being handled does not end the loop: an Error from the closing of the socket is logged, and the next attempt connects. */
+	@Test
+	void aFailureWhileTheSocketIsBeingClosedDoesNotEndTheLoop() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		FakeIbClient ib = new FakeIbClient();
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(100), Duration.ofMillis(100));
+		callbacks.listener(conn);
+		java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+		java.util.concurrent.atomic.AtomicBoolean closeFails = new java.util.concurrent.atomic.AtomicBoolean(true);
+		ib.onDisconnect = () -> {
+			if (closeFails.compareAndSet(true, false)) {
+				throw new StackOverflowError("an error, not an exception");
+			}
+		};
+		ib.onOpenOrders = () -> {
+			if (asked.incrementAndGet() == 1) {
+				throw new IllegalStateException("the first reading fails");
+			}
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(state::connected);
+			assertEquals(2, ib.connectAttempts, "the loop went on after the failure of the closing");
+			assertFalse(closeFails.get());
 		} finally {
 			conn.stop();
 		}

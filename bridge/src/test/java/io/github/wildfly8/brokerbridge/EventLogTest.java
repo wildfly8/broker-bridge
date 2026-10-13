@@ -220,30 +220,51 @@ class EventLogTest {
 		assertFalse(log.isFinal(99), "an order the log has never heard of");
 	}
 
+	private static List<Long> ids(List<EventLog.OrderRecord> orders) {
+		return orders.stream().map(EventLog.OrderRecord::clientOrderId).toList();
+	}
+
 	/**
-	 * An order with a record and no status among the kept events is either one placed just before the bridge stopped or an old one whose events
-	 * left the replay window; only the newest are armed, so that the old ones are not each given a status at the next connection.
+	 * An order with a record and no status among the kept events is unseen, and looked for at the next connection, only when it was placed after
+	 * the oldest event the log has lost: before that, its statuses may be among the events that left the replay window and having none says
+	 * nothing of it. (A count of the newest hundred gave the old ones their status a hundred at each connection instead of none.)
 	 */
 	@Test
-	void onlyTheNewestOrdersWithoutAStatusAreListedAsUnfinished() {
-		EventLog log = EventLog.inMemory(1000, 5_000L);
+	void anOrderWithoutAStatusIsUnfinishedOnlyWhenItWasPlacedAfterTheOldestEventTheLogLost() {
+		EventLog log = EventLog.inMemory(5, 5_000L); // ids start at 5,000,000; five events are kept
 		Instrument spy = Instrument.stock("SPY", "SMART", "USD");
-		int unseen = EventLog.MAX_ARMED_WITHOUT_STATUS + 5;
-		log.recordOrder(new EventLog.OrderRecord(1, 11, "1", spy, "2026-10-13T12:00:00Z"));
-		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 1, "status", "Submitted"));
-		for (int i = 0; i < unseen; i++) {
-			log.recordOrder(new EventLog.OrderRecord(100 + i, 1000 + i, "1", spy, "2026-10-13T12:00:00Z"));
+		log.recordOrder(new EventLog.OrderRecord(1, 11, "1", spy, java.time.Instant.ofEpochMilli(5_000).toString()));
+		assertEquals(List.of(1L), ids(log.unfinishedOrders()), "nothing has been lost yet");
+		for (int i = 0; i < 7; i++) {
+			log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 9, "status", "Submitted"));
 		}
-		log.recordOrder(new EventLog.OrderRecord(2, 12, "1", spy, "2026-10-13T12:00:00Z"));
-		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 2, "status", "Submitted"));
+		// the first two events left the window: everything up to the id 5,000,001 may be missing
+		assertTrue(log.truncatedAfter(5_000_000L));
+		assertFalse(log.truncatedAfter(5_000_001L));
+		assertEquals(List.of(), ids(log.unfinishedOrders()), "order 1 was placed (5,000 ms: ids from 5,000,000) among the events that were lost");
+		log.recordOrder(new EventLog.OrderRecord(2, 12, "1", spy, java.time.Instant.ofEpochMilli(5_002).toString()));
+		assertEquals(List.of(2L), ids(log.unfinishedOrders()), "order 2 was placed after them: its statuses, if it had any, are all kept");
+		// a long list of old orders without a status is not looked for, now or after another order is concluded
+		for (int i = 0; i < 250; i++) {
+			log.recordOrder(new EventLog.OrderRecord(100 + i, 1000 + i, "1", spy, java.time.Instant.ofEpochMilli(4_000).toString()));
+		}
+		assertEquals(List.of(2L), ids(log.unfinishedOrders()));
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 2, "status", "Inactive"));
+		assertEquals(List.of(), ids(log.unfinishedOrders()), "and concluding one does not bring the old ones in, as a count did");
+	}
 
-		List<Long> ids = log.unfinishedOrders().stream().map(EventLog.OrderRecord::clientOrderId).toList();
-		assertEquals(2 + EventLog.MAX_ARMED_WITHOUT_STATUS, ids.size(), "the working ones, whatever their age, and the newest without a status");
-		assertEquals(1L, ids.get(0), "an order with a working status is listed whatever its age");
-		assertEquals(105L, ids.get(1), "the five oldest without a status are not listed");
-		assertEquals(100L + unseen - 1, ids.get(ids.size() - 2));
-		assertEquals(2L, ids.get(ids.size() - 1));
-		assertEquals(100, EventLog.MAX_ARMED_WITHOUT_STATUS);
+	/** The boundary is the id of the oldest lost event itself, and a placement time that cannot be read is no placement time. */
+	@Test
+	void theBoundaryIsTheOldestLostEventAndAPlacementTimeThatCannotBeReadCountsForNothing() throws Exception {
+		String order = "{\"t\":\"o\",\"order\":{\"clientOrderId\":%d,\"brokerOrderId\":%d,\"tag\":\"4\","
+				+ "\"instrument\":{\"symbol\":\"SPY\",\"type\":\"STOCK\"},\"placedAt\":\"%s\"}}\n";
+		Files.writeString(dir.resolve("journal.jsonl"), "{\"t\":\"h\",\"id\":5000000}\n"
+				+ String.format(order, 7001, 10, java.time.Instant.ofEpochMilli(5_000))        // ids from 5,000,000: the lost event is the first of its events
+				+ String.format(order, 7002, 11, java.time.Instant.ofEpochMilli(5_001))        // ids from 5,001,000: all kept
+				+ String.format(order, 7003, 12, "yesterday"), StandardCharsets.UTF_8);
+		try (EventLog log = EventLog.open(dir, 100, 6_000L)) {
+			assertEquals(List.of(7002L), ids(log.unfinishedOrders()));
+		}
 	}
 
 	@Test

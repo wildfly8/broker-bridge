@@ -25,6 +25,8 @@ class FakeIbClient implements IbClient {
 	/** Runs when the open orders are asked for; a test that wants the connection to be marked up answers with {@code openOrderEnd} and {@code completedOrdersEnd}. */
 	volatile Runnable onOpenOrders = () -> {};
 	volatile Runnable onCompletedOrders = () -> {};
+	/** Runs when the socket is closed by {@link #disconnect}; IB's client reports the closed connection to its callbacks there. */
+	volatile Runnable onDisconnect = () -> {};
 
 	@Override
 	public boolean connect(String host, int port, int clientId) {
@@ -41,6 +43,7 @@ class FakeIbClient implements IbClient {
 	public void disconnect() {
 		calls.add("disconnect");
 		connected = false;
+		onDisconnect.run();
 	}
 
 	@Override

@@ -83,12 +83,14 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
 | POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing, with `Retry-After` when the broker named a wait |
 | POST | `/v1/contracts/resolve` | `{instrument}` → `{instrument, marketName, minTick, priceMagnifier, orderTypes, validExchanges}` · 404 none |
-| POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 (handed to IB's client: not an acknowledgement, the order's `order-status` events are) · 400 the order is wrong by itself (quantity, type, time in force, side, a price, a reference over 128 characters): nothing is claimed or sent, so the same `clientOrderId` can be sent again corrected · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected, or IB's link to its servers is down (`linkUp`) |
+| POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 (handed to IB's client: not an acknowledgement, the order's `order-status` events are) · 400 the order is wrong by itself (quantity, type, time in force, side, a price, a multiplier that is no number, a reference over 128 characters): it is looked at first, before the state of the session, IB's link and the client order id, so a 400 is never a reason to wait, and nothing is claimed or sent, so the same `clientOrderId` can be sent again corrected · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected, or IB's link to its servers is down (`linkUp`) |
 | DELETE | `/v1/orders/{clientOrderId}` | → 202 (also with `BRIDGE_ORDERS_ENABLED=false`: a cancel is not an order) · 401 token missing or wrong (when one is configured) · 404 unknown · 503 disconnected, or IB's link to its servers is down |
 | GET | `/v1/events` | `text/event-stream`: `connection`, `quote`, `snapshot-end`, `order-status`, `fill`, `error`; `: heartbeat` every 15 s |
 
 **Instrument**: `{symbol, type: STOCK|OPTION|FUTURE|FUTURE_OPTION|INDEX|FX|COMBO, exchange, primaryExchange, currency,
-expiry, right: CALL|PUT, strike, multiplier, brokerId, legs: [{brokerId, ratio, side, exchange}]}`.
+expiry, right: CALL|PUT, strike, multiplier, brokerId, legs: [{brokerId, ratio, side, exchange}]}`. A `multiplier` is a positive number or empty
+(400 otherwise, on every route): IB's client parses it when it encodes an order, and closes the session, for every client, when it
+is not one.
 
 **Quote event**: `{tag, subscriptionId, field, code, price, size, option: {impliedVol, delta, gamma, theta, vega,
 optionPrice, underlyingPrice}, time, delayed}`. `code` is the broker's own numeric field code (with the IB adapter, an IB tick
@@ -153,8 +155,8 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
   it carries, with its client id, tag and instrument, and so is the order of an execution; a reference of another shape
   (an order of an older bridge, one typed into the broker's own application) is left alone. An order that the bridge had
   not seen end (its latest kept status is not final, or it has none and the bridge recorded when it was placed; of those with
-  none only the newest 100 are looked for, since an older one is an order whose events left the replay window, not an
-  unseen one) and that the broker lists neither open nor completed gets a final `order-status` before `connected` is announced: the status the
+  none only the ones placed after the oldest order event the bridge has lost, since an older one may have had its statuses
+  among the events that left the replay window) and that the broker lists neither open nor completed gets a final `order-status` before `connected` is announced: the status the
   broker gave it among its completed orders (`Filled` or `Cancelled`, with `filled` and `remaining`, `whyHeld` saying that
   the broker listed it as completed), otherwise `Inactive` with `whyHeld` "not among IB's open orders when the bridge
   connected". If the broker does not end its list of open orders in time the bridge goes on, concludes nothing and says so

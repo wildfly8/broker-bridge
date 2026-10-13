@@ -3,6 +3,7 @@ package io.github.wildfly8.brokerbridge;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -17,6 +18,28 @@ import io.github.wildfly8.brokerbridge.Model.InstrumentDetails;
 import io.github.wildfly8.brokerbridge.Model.Leg;
 
 class ContractsTest {
+
+	/**
+	 * IB's client parses the multiplier when it encodes an order, and closes the session when the text is no number (every client loses its
+	 * streams): the bridge refuses such an instrument, whatever the route, before anything is claimed or sent.
+	 */
+	@Test
+	void aMultiplierThatIsNoPositiveNumberIsRefused() {
+		for (String bad : new String[] { "abc", "1,000", "1e", "0", "-100", "NaN", "Infinity", "-Infinity", "0x10" }) {
+			Instrument in = new Instrument("SPY", "OPTION", "SMART", null, "USD", "20261218", "CALL", 500.0, bad, null, null);
+			ApiException e = assertThrows(ApiException.class, () -> Contracts.toIb(in), bad);
+			assertEquals(400, e.status(), bad);
+			assertTrue(e.getMessage().contains("multiplier"), e.getMessage());
+		}
+		for (String good : new String[] { "100", " 100 ", "0.5", "1000.0", "1E3" }) {
+			Instrument in = new Instrument("SPY", "OPTION", "SMART", null, "USD", "20261218", "CALL", 500.0, good, null, null);
+			assertEquals(good.trim(), Contracts.toIb(in).multiplier(), good);
+		}
+		for (String none : new String[] { null, "", "  " }) {
+			Instrument in = new Instrument("SPY", "OPTION", "SMART", null, "USD", "20261218", "CALL", 500.0, none, null, null);
+			assertNull(Contracts.toIb(in).multiplier(), "[" + none + "]");
+		}
+	}
 
 	@Test
 	void stock() {

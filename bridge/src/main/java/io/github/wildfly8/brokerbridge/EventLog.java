@@ -43,12 +43,6 @@ final class EventLog implements AutoCloseable {
 	 */
 	private static final int MAX_ORDERS_OPEN = 100_000;
 	private static final int MAX_FILL_IDS = 50_000;
-	/**
-	 * The most orders that have a record and no status among the kept events that {@link #unfinishedOrders} lists, the newest of them: an order
-	 * placed just before the bridge stopped has no status yet, while one whose events left the replay window long ago is not unseen but old,
-	 * and giving each of those a status at the next connection would be a burst of statuses for orders that ended days ago.
-	 */
-	static final int MAX_ARMED_WITHOUT_STATUS = 100;
 	/** The statuses after which an order does not work any more. */
 	private static final Set<String> FINAL_STATUSES = Set.of("Filled", "Cancelled", "ApiCancelled", "Inactive", "Rejected");
 
@@ -199,29 +193,40 @@ final class EventLog implements AutoCloseable {
 
 	/**
 	 * The orders that may still work as far as the bridge knows: those whose latest status is not final, and those that have no
-	 * status yet and were entered with a placement time, the newest {@link #MAX_ARMED_WITHOUT_STATUS} of them. An order from before the placement
-	 * time was kept and without a status among the kept events is old as likely as it is unseen, and is not listed.
+	 * status yet and were entered with a placement time after the oldest event the log has lost ({@link #horizon}): an order placed before that
+	 * may have had its statuses among the events that left the replay window, so that having none says nothing of it, and it is not listed. One
+	 * from before the placement time was kept and without a status among the kept events is old as likely as it is unseen, and is not listed.
 	 */
 	synchronized List<OrderRecord> unfinishedOrders() {
-		List<Long> unseen = new ArrayList<>();
-		for (OrderRecord o : orders.values()) {
-			if (o.placedAt() != null && !lastStatus.containsKey(o.clientOrderId())) {
-				unseen.add(o.clientOrderId());
-			}
-		}
-		Set<Long> armed = new java.util.HashSet<>(unseen.subList(Math.max(0, unseen.size() - MAX_ARMED_WITHOUT_STATUS), unseen.size()));
-		if (unseen.size() > armed.size()) {
-			log.warn("{} orders have a record and no status among the kept events: only the newest {} may still work, the others are not looked for",
-					unseen.size(), armed.size());
-		}
 		List<OrderRecord> out = new ArrayList<>();
+		int lost = 0;
 		for (OrderRecord o : orders.values()) {
 			String status = lastStatus.get(o.clientOrderId());
-			if (status != null ? !FINAL_STATUSES.contains(status) : armed.contains(o.clientOrderId())) {
-				out.add(o);
+			if (status != null) {
+				if (!FINAL_STATUSES.contains(status)) {
+					out.add(o);
+				}
+			} else if (o.placedAt() != null) {
+				if (placedAfterHorizon(o)) {
+					out.add(o);
+				} else {
+					lost++;
+				}
 			}
 		}
+		if (lost > 0) {
+			log.info("{} orders have a record and no status among the kept events, and were placed before the oldest event the log has lost: not looked for", lost);
+		}
 		return out;
+	}
+
+	/** Event ids are the time in ms times 1000 plus a count, so an order placed at T has only events above T × 1000: they are all kept when the horizon is below. */
+	private boolean placedAfterHorizon(OrderRecord o) {
+		try {
+			return java.time.Instant.parse(o.placedAt()).toEpochMilli() * 1000 > horizon;
+		} catch (java.time.format.DateTimeParseException e) {
+			return false;
+		}
 	}
 
 	/** True the first time a fill id is seen (in this run or in the journal). */

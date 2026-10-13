@@ -344,6 +344,7 @@ class BridgeHttpServerTest {
 				order(7001L, false).replace("\"timeInForce\":\"DAY\"", "\"timeInForce\":\"FOK\""),
 				order(7001L, false).replace(",\"limitPrice\":500.0", ""),
 				order(7001L, false).replace("\"side\":\"BUY\"", "\"side\":\"HOLD\""),
+				order(7001L, false).replace(SPY, SPY.replace("}", ",\"multiplier\":\"1,000\"}")),
 				order(7001L, false).replace("\"tag\":\"4\"", "\"tag\":\"" + "t".repeat(OrderRefs.MAX_LENGTH) + "\"") };
 		for (String body : bad) {
 			HttpResponse<String> r = send("POST", "/v1/orders", body);
@@ -361,6 +362,28 @@ class BridgeHttpServerTest {
 		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode(), "the same client id, corrected, is taken");
 		assertTrue(ib.calls.contains("placeOrder 10 BUY 100 LMT 500.0"), "and gets the first broker id: " + ib.calls);
 		assertEquals(11, state.nextOrderId.get());
+	}
+
+	/**
+	 * The order is looked at first: whatever is wrong with the session, the link or the id, an order that is wrong by itself is a 400, which no
+	 * retry can change, where a good one gets the 503 that says to try again.
+	 */
+	@Test
+	void anOrderThatIsWrongByItselfIsRefusedWith400WhateverTheStateOfTheSessionTheLinkOrTheId() throws Exception {
+		start(true, false);
+		String bad = order(7001L, false).replace("\"quantity\":100", "\"quantity\":0");
+		assertEquals(400, send("POST", "/v1/orders", bad).statusCode(), "disconnected");
+		assertEquals(503, send("POST", "/v1/orders", order(7001L, false)).statusCode(), "a good order waits for the session");
+		state.connected(true, 222);
+		ib.connected = true;
+		state.nextOrderId.set(10);
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		assertEquals(400, send("POST", "/v1/orders", bad).statusCode(), "the id is used");
+		assertEquals(400, send("POST", "/v1/orders", bad.replace("7001", "7099").replace("\"BUY\"", "\"BUY\",\"modify\":true")).statusCode(), "a modification of an unknown id");
+		callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+		assertEquals(400, send("POST", "/v1/orders", bad).statusCode(), "IB's link is down");
+		assertEquals(503, send("POST", "/v1/orders", order(7002L, false)).statusCode(), "and a good order waits for it");
+		assertEquals(1, ib.count("placeOrder"));
 	}
 
 	/** A modification refused for what it says leaves the order as it was: still known under its broker id, and not sent. */

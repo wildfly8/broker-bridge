@@ -198,8 +198,8 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		}
 		state.connected(true, client.serverVersion());
 		state.lastError(null);
-		log.info("Connected to IB, server version {}", client.serverVersion());
 		hub.publish("connection", broker.status());
+		log.info("Connected to IB, server version {}", client.serverVersion());
 		return true;
 	}
 
@@ -239,13 +239,22 @@ final class IbConnection implements IbCallbacks.SessionListener {
 	 */
 	private void releaseUnmarkedSession() {
 		try {
-			if (client.isConnected() && !state.connected()) {
+			boolean open;
+			try {
+				open = client.isConnected();
+			} catch (RuntimeException e) {
+				// a client that cannot say is closed: closing one that is not open does no harm
+				log.warn("IB client could not say whether its socket is open after the failure: {}", e.toString());
+				open = true;
+			}
+			if (open && !state.connected()) {
 				log.warn("IB session left open without being marked up; closing it");
 				state.sync = null;
 				dropSession();
 			}
-		} catch (RuntimeException e) {
-			log.warn("IB session could not be closed after the failure: {}", e.toString());
+		} catch (Throwable t) {
+			// this runs in the handler of the loop's own failures: nothing that goes wrong here may end the loop
+			log.warn("IB session could not be closed after the failure: {}", t.toString());
 		}
 	}
 
