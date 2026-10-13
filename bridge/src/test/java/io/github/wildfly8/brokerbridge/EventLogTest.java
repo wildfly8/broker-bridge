@@ -198,6 +198,45 @@ class EventLogTest {
 		}
 	}
 
+	/** The orders that may still work, as far as the bridge knows, are the ones the reading of the broker's lists is armed with. */
+	@Test
+	void theUnfinishedOrdersAreThoseWhoseLatestStatusIsNotFinalAndThoseWithoutOneThatHaveAPlacementTime() {
+		EventLog log = EventLog.inMemory(1000, 5_000L);
+		Instrument spy = Instrument.stock("SPY", "SMART", "USD");
+		log.recordOrder(new EventLog.OrderRecord(1, 11, "1", spy, "2026-10-13T12:00:00Z"));       // working
+		log.recordOrder(new EventLog.OrderRecord(2, 12, "1", spy, "2026-10-13T12:00:00Z"));       // ended
+		log.recordOrder(new EventLog.OrderRecord(3, 13, "1", spy, "2026-10-13T12:00:00Z"));       // no status yet, placed by this bridge
+		log.recordOrder(new EventLog.OrderRecord(4, 14, "1", spy));                                // no status, from before the placement time was kept
+		log.recordOrder(new EventLog.OrderRecord(5, 15, "1", spy));                                // old, but its status is still known
+		log.recordOrder(new EventLog.OrderRecord(6, 16, "1", spy, "2026-10-13T12:00:00Z"));       // ended, its status replaced by a later one
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 1, "status", "Submitted"));
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 2, "status", "Filled"));
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 5, "status", "PreSubmitted"));
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 6, "status", "Cancelled"));
+		assertEquals(List.of(1L, 3L, 5L), log.unfinishedOrders().stream().map(EventLog.OrderRecord::clientOrderId).toList());
+		assertTrue(log.isFinal(2) && log.isFinal(6));
+		assertFalse(log.isFinal(1), "a working status");
+		assertFalse(log.isFinal(3), "no status");
+		assertFalse(log.isFinal(99), "an order the log has never heard of");
+	}
+
+	@Test
+	void thePlacementTimeSurvivesARestartAndAJournalLineWithoutOneReadsAsNone() throws Exception {
+		try (EventLog log = EventLog.open(dir, 100, 5_000L)) {
+			log.recordOrder(new EventLog.OrderRecord(7001, 10, "4", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z"));
+		}
+		// a record written before the placement time existed
+		Files.writeString(dir.resolve("journal.jsonl"), Files.readString(dir.resolve("journal.jsonl")) + "{\"t\":\"o\",\"order\":{\"clientOrderId\":7002,"
+				+ "\"brokerOrderId\":11,\"tag\":\"4\",\"instrument\":{\"symbol\":\"SPY\",\"type\":\"STOCK\"}}}\n", StandardCharsets.UTF_8);
+		try (EventLog log = EventLog.open(dir, 100, 6_000L)) {
+			assertEquals("2026-10-13T12:00:00Z", log.orders().get(0).placedAt());
+			assertEquals(7002, log.orders().get(1).clientOrderId());
+			assertEquals(null, log.orders().get(1).placedAt());
+			assertEquals(List.of(7001L), log.unfinishedOrders().stream().map(EventLog.OrderRecord::clientOrderId).toList(),
+					"the old record without a status is not concluded to have ended");
+		}
+	}
+
 	@Test
 	void damagedLinesAreSkipped() throws Exception {
 		Files.writeString(dir.resolve("journal.jsonl"),

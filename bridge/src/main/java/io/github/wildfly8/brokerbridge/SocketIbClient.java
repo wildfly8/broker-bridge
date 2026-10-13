@@ -162,4 +162,14 @@ final class SocketIbClient implements IbClient {
 		filter.clientId(clientId);
 		socket.reqExecutions(reqId, filter);
 	}
+
+	@Override
+	public void reqOpenOrders() {
+		socket.reqOpenOrders();
+	}
+
+	@Override
+	public void reqCompletedOrders(boolean apiOnly) {
+		socket.reqCompletedOrders(apiOnly);
+	}
 }

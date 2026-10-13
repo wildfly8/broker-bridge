@@ -107,13 +107,18 @@ new or was lost with its volume (the bridge cannot know what happened before it)
 journal keeps the horizon the journal recorded and invents none. After those replayed order events (and when there is
 nothing to replay) the bridge sends one `event: replay-complete` with id 0, `{replayed, after}` (`after` only when the
 client asked to resume). It is not journaled. On every broker connection the bridge also asks
-the broker for the day's executions, so fills made while it was down are sent too. Fills are unique by
-`fillId`; delivery is at-least-once, so clients should ignore a `fillId` they already have.
+the broker for its open and completed orders and for the day's executions (see Behaviour), so fills made while it was
+down are sent too. Fills are unique by `fillId`; delivery is at-least-once, so clients should ignore a `fillId` they
+already have.
 
 **Tags**: `tag` is any string the client chooses for a subscription or order (e.g. which
 of its components should get the data). Every quote, snapshot-end, order-status and fill
 event that results from it carries the same `tag`. `orderRef` is passed to the broker as
-the order reference.
+the order reference, followed by the `clientOrderId` and the `tag`: the broker gets
+`<orderRef>#<clientOrderId>#<tag>` (for example `INV#1791348607#3`; `#` and `%` in the tag are written `%23` and
+`%25`; the whole reference may have at most 128 characters, a longer one is refused with 400 before anything is
+claimed or sent). The broker returns the reference whenever it reports an order, so the bridge recognises its own
+orders from the broker's data alone (see Behaviour: what the broker holds, read at every connect).
 
 **Compatibility**: API v1 only grows by adding optional fields and new event types. Clients
 must ignore fields and event types they don't know; the bridge ignores unknown request fields.
@@ -135,6 +140,23 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
   every 15 s that the client answers within 45 s and that the connection loop has gone round within 5 minutes; if not,
   it logs a thread dump (locks included) and ends the process (`Runtime.halt`, exit 70), so that the container's
   restart policy starts a new bridge in seconds. `BRIDGE_WATCHDOG=off` turns it off.
+- **What the broker holds, read at every connect.** The broker documents that an order status is not guaranteed for every
+  change, so the bridge does not rely on being told. After the market-data type and the order ids it asks for the
+  client's open orders and its completed orders, then for the day's executions, and it marks the session up
+  (`connected: true`, orders are taken, the `connection` event goes out) only when both lists have ended: it waits at most
+  15 s for the open orders and 3 s more for the completed ones, and not at all once the connection is lost again. An
+  order that the broker lists and the bridge has no record of (its journal was lost) is entered again from the reference
+  it carries, with its client id, tag and instrument, and so is the order of an execution; a reference of another shape
+  (an order of an older bridge, one typed into the broker's own application) is left alone. An order that the bridge had
+  not seen end (its latest kept status is not final, or it has none and the bridge recorded when it was placed) and that
+  the broker lists neither open nor completed gets a final `order-status` before `connected` is announced: the status the
+  broker gave it among its completed orders (`Filled` or `Cancelled`, with `filled` and `remaining`, `whyHeld` saying that
+  the broker listed it as completed), otherwise `Inactive` with `whyHeld` "not among IB's open orders when the bridge
+  connected". If the broker does not end its list of open orders in time the bridge goes on, concludes nothing and says so
+  in its log. Limits: the broker reports executions since midnight only, so a fill made before midnight while the bridge was
+  away is not recovered (the order's final status is, and its `filled` shows what it came to); orders placed under another
+  `IB_CLIENT_ID` are not listed for this client and would be concluded `Inactive`: cancel them in the broker's own
+  application before changing the client id.
 - Order ids: the caller's `clientOrderId` is mapped to the broker's order id inside the bridge; status, fills and order
   errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
   earlier orders still arrive after a bridge restart. A broker order id that belongs to another order is never used

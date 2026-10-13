@@ -39,6 +39,8 @@ final class BridgeState {
 	final AtomicInteger orderIdFloor = new AtomicInteger(0);
 	final Map<Integer, OrderRef> ordersByIbId = new ConcurrentHashMap<>();
 	final Map<Long, Integer> ibIdByClientOrderId = new ConcurrentHashMap<>();
+	/** The reading of the broker's open and completed orders that the connection is making, or null when none is. */
+	volatile OrderSync sync;
 
 	private final String startedAt = Instant.now().toString();
 	private final Map<String, Boolean> dataFarms = new ConcurrentHashMap<>();

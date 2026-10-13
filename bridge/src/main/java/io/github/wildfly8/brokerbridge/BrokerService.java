@@ -202,7 +202,7 @@ final class BrokerService {
 		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.tag(), r.instrument()));
 		state.ibIdByClientOrderId.put(clientOrderId, ibId);
 		if (!Boolean.TRUE.equals(r.modify())) {
-			eventLog.recordOrder(new EventLog.OrderRecord(clientOrderId, ibId, r.tag(), r.instrument()));
+			eventLog.recordOrder(new EventLog.OrderRecord(clientOrderId, ibId, r.tag(), r.instrument(), java.time.Instant.now().toString()));
 		}
 		client.placeOrder(ibId, contract, order);
 		log.info("{} order {} (broker {}) {} {} {} @ {}", Boolean.TRUE.equals(r.modify()) ? "Modified" : "Placed",

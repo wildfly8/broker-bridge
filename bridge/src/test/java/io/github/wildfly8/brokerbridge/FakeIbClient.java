@@ -22,6 +22,9 @@ class FakeIbClient implements IbClient {
 	volatile BiConsumer<Integer, Contract> onHistory = (id, c) -> {};
 	volatile BiConsumer<Integer, Contract> onDetails = (id, c) -> {};
 	volatile java.util.function.IntConsumer onExecutions = id -> {};
+	/** Runs when the open orders are asked for; a test that wants the connection to be marked up answers with {@code openOrderEnd} and {@code completedOrdersEnd}. */
+	volatile Runnable onOpenOrders = () -> {};
+	volatile Runnable onCompletedOrders = () -> {};
 
 	@Override
 	public boolean connect(String host, int port, int clientId) {
@@ -108,6 +111,18 @@ class FakeIbClient implements IbClient {
 	public void reqExecutions(int reqId, int clientId) {
 		calls.add("executions " + reqId + " " + clientId);
 		onExecutions.accept(reqId);
+	}
+
+	@Override
+	public void reqOpenOrders() {
+		calls.add("openOrders");
+		onOpenOrders.run();
+	}
+
+	@Override
+	public void reqCompletedOrders(boolean apiOnly) {
+		calls.add("completedOrders " + apiOnly);
+		onCompletedOrders.run();
 	}
 
 	long count(String prefix) {

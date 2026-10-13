@@ -36,4 +36,10 @@ interface IbClient {
 
 	/** Today's executions for this client id; they arrive as execDetails callbacks. */
 	void reqExecutions(int reqId, int clientId);
+
+	/** The orders of this client id that the broker still holds open: openOrder and orderStatus callbacks, then openOrderEnd. */
+	void reqOpenOrders();
+
+	/** The orders of this client id (or of every client when {@code apiOnly} is false) that the broker has completed: completedOrder callbacks, then completedOrdersEnd. */
+	void reqCompletedOrders(boolean apiOnly);
 }

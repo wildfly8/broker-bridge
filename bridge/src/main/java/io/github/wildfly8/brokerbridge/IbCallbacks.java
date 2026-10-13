@@ -11,6 +11,7 @@ import com.ib.client.ContractDetails;
 import com.ib.client.Decimal;
 import com.ib.client.DefaultEWrapper;
 import com.ib.client.Execution;
+import com.ib.client.OrderState;
 import com.ib.client.TickAttrib;
 
 import io.github.wildfly8.brokerbridge.BridgeState.OrderRef;
@@ -177,6 +178,72 @@ class IbCallbacks extends DefaultEWrapper {
 		state.nextOrderId.accumulateAndGet(Math.max(orderId, state.orderIdFloor.get()), Math::max);
 	}
 
+	/**
+	 * The order the broker's order id belongs to: the record the bridge has or, when it has none, one rebuilt from the order reference the bridge
+	 * itself sent with the order ({@link OrderRefs}), so that an order that works at the broker is not deaf after a restart that lost
+	 * the journal. A reference of another shape, or an order id (0) that the broker gives to the orders of other clients, is not the bridge's.
+	 */
+	private OrderRef known(int ibId, String orderRef, Contract contract) {
+		OrderRef ref = state.ordersByIbId.get(ibId);
+		if (ref != null) {
+			return ref;
+		}
+		OrderRefs.Parsed p = OrderRefs.decode(orderRef);
+		if (p == null || ibId <= 0) {
+			return null;
+		}
+		OrderRef rebuilt = new OrderRef(p.clientOrderId(), p.tag(), contract == null ? null : Contracts.fromIb(contract));
+		Integer other = state.ibIdByClientOrderId.putIfAbsent(p.clientOrderId(), ibId);
+		if (other != null) {
+			log.warn("IB order {} carries client order id {}, which is broker order {} here: it is not entered", ibId, p.clientOrderId(), other);
+			return null;
+		}
+		OrderRef raced = state.ordersByIbId.putIfAbsent(ibId, rebuilt);
+		if (raced != null) {
+			state.ibIdByClientOrderId.remove(p.clientOrderId(), ibId);
+			return raced;
+		}
+		state.orderIdFloor.accumulateAndGet(ibId + 1, Math::max);
+		hub.eventLog().recordOrder(new EventLog.OrderRecord(p.clientOrderId(), ibId, p.tag(), rebuilt.instrument(), Instant.now().toString()));
+		log.info("Order {} (broker {}) was not known and is entered again from the order reference IB returned with it", p.clientOrderId(), ibId);
+		return rebuilt;
+	}
+
+	@Override
+	public void openOrder(int orderId, Contract contract, com.ib.client.Order order, OrderState orderState) {
+		OrderRef ref = known(orderId, order == null ? null : order.orderRef(), contract);
+		OrderSync sync = state.sync;
+		if (ref != null && sync != null) {
+			sync.open(ref.clientOrderId());
+		}
+	}
+
+	@Override
+	public void openOrderEnd() {
+		OrderSync sync = state.sync;
+		if (sync != null) {
+			sync.openEnd();
+		}
+	}
+
+	@Override
+	public void completedOrder(Contract contract, com.ib.client.Order order, OrderState orderState) {
+		OrderSync sync = state.sync;
+		OrderRefs.Parsed p = order == null ? null : OrderRefs.decode(order.orderRef());
+		if (sync != null && p != null) {
+			sync.completed(p.clientOrderId(), orderState == null ? null : orderState.getStatus(), number(order.filledQuantity()),
+					number(order.totalQuantity()));
+		}
+	}
+
+	@Override
+	public void completedOrdersEnd() {
+		OrderSync sync = state.sync;
+		if (sync != null) {
+			sync.completedEnd();
+		}
+	}
+
 	@Override
 	public void orderStatus(int orderId, String status, Decimal filled, Decimal remaining, double avgFillPrice,
 			long permId, int parentId, double lastFillPrice, int clientId, String whyHeld, double mktCapPrice) {
@@ -192,7 +259,7 @@ class IbCallbacks extends DefaultEWrapper {
 
 	@Override
 	public void execDetails(int reqId, Contract contract, Execution e) {
-		OrderRef ref = state.ordersByIbId.get(e.orderId());
+		OrderRef ref = known(e.orderId(), e.orderRef(), contract);
 		if (ref == null) {
 			log.debug("Fill for an order this bridge didn't place: {}", e.orderId());
 			return;

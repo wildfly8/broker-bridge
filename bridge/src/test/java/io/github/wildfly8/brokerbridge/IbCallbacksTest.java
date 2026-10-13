@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.ib.client.ContractDetails;
 import com.ib.client.Decimal;
 import com.ib.client.Execution;
+import com.ib.client.OrderState;
 import com.ib.client.TickAttrib;
 
 import io.github.wildfly8.brokerbridge.Model.Instrument;
@@ -196,6 +197,124 @@ class IbCallbacksTest {
 		List<String[]> ev = drain();
 		assertEquals("error", ev.get(1)[0]);
 		assertTrue(json(ev.get(1)[1]).get("retryable").asBoolean());
+	}
+
+	private static com.ib.client.Order withRef(String orderRef) {
+		com.ib.client.Order o = new com.ib.client.Order();
+		o.orderRef(orderRef);
+		o.totalQuantity(Decimal.get(BigDecimal.valueOf(30)));
+		return o;
+	}
+
+	/** IB's {@code OrderState} has a package-private constructor (its source is vendored unchanged): the broker's own reader makes it. */
+	private static OrderState stateOf(String status) throws Exception {
+		java.lang.reflect.Constructor<OrderState> c = OrderState.class.getDeclaredConstructor();
+		c.setAccessible(true);
+		OrderState st = c.newInstance();
+		st.status(status);
+		return st;
+	}
+
+	/** An order IB lists as open, which the journal does not know (a lost journal), is entered again from the reference the bridge sent with it. */
+	@Test
+	void anOpenOrderTheBridgeDoesNotKnowIsEnteredAgainFromItsOrderReference() throws Exception {
+		callbacks.openOrder(41, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef("INV#7001#4"), stateOf("Submitted"));
+		assertEquals(7001L, state.ordersByIbId.get(41).clientOrderId());
+		assertEquals("4", state.ordersByIbId.get(41).tag());
+		assertEquals("SPY", state.ordersByIbId.get(41).instrument().symbol());
+		assertEquals(41, state.ibIdByClientOrderId.get(7001L));
+		assertEquals(42, state.orderIdFloor.get(), "the counter stays above an order the broker holds");
+		assertEquals(1, hub.eventLog().orders().size(), "and the journal has it");
+		assertEquals(41, hub.eventLog().orders().get(0).brokerOrderId());
+		assertTrue(hub.eventLog().orders().get(0).placedAt() != null);
+		// its status now reaches the client, with the tag
+		callbacks.orderStatus(41, "Submitted", Decimal.ZERO, Decimal.get(BigDecimal.valueOf(30)), 0, 99L, 0, 0, 11, null, 0);
+		List<String[]> ev = drain();
+		assertEquals(1, ev.size());
+		assertEquals("order-status", ev.get(0)[0]);
+		assertEquals(7001, json(ev.get(0)[1]).get("clientOrderId").asInt());
+		assertEquals("4", json(ev.get(0)[1]).get("tag").asText());
+	}
+
+	@Test
+	void anOpenOrderOfAnotherShapeOrOfAnotherClientIsLeftAlone() throws Exception {
+		callbacks.openOrder(41, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef("INV"), stateOf("Submitted"));
+		callbacks.openOrder(42, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef(null), stateOf("Submitted"));
+		callbacks.openOrder(0, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef("INV#7002#4"), stateOf("Submitted"));
+		assertTrue(state.ordersByIbId.isEmpty(), "an older bridge's order, one without a reference, and an order the broker gives the id 0 (another client's)");
+		assertTrue(hub.eventLog().orders().isEmpty());
+		callbacks.orderStatus(41, "Submitted", Decimal.ZERO, Decimal.ZERO, 0, 0, 0, 0, 11, null, 0);
+		assertTrue(drain().isEmpty(), "and its status is dropped as before");
+	}
+
+	@Test
+	void aClientOrderIdThatBelongsToAnotherBrokerOrderIsNotEnteredASecondTime() throws Exception {
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
+		state.ibIdByClientOrderId.put(7001L, 7);
+		callbacks.openOrder(41, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef("INV#7001#4"), stateOf("Submitted"));
+		assertFalse(state.ordersByIbId.containsKey(41), "the order the bridge has stays the one with that client order id");
+		assertEquals(7, state.ibIdByClientOrderId.get(7001L));
+		assertTrue(hub.eventLog().orders().isEmpty());
+	}
+
+	@Test
+	void anOrderTheBridgeKnowsIsNotEnteredAgainAndIsNoted() throws Exception {
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
+		state.ibIdByClientOrderId.put(7001L, 7);
+		OrderSync sync = new OrderSync(List.of());
+		state.sync = sync;
+		callbacks.openOrder(7, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef("INV#9999#9"), stateOf("Submitted"));
+		assertEquals(7001L, state.ordersByIbId.get(7).clientOrderId(), "the record the bridge has wins over the reference");
+		assertTrue(hub.eventLog().orders().isEmpty(), "nothing new to journal");
+		callbacks.openOrderEnd();
+		callbacks.completedOrdersEnd();
+		assertTrue(sync.openEnded());
+		callbacks.openOrderEnd(); // no reading under way: nothing happens
+		state.sync = null;
+		callbacks.openOrderEnd();
+		callbacks.completedOrdersEnd();
+	}
+
+	@Test
+	void theOrdersTheBrokerListsAsCompletedAreNotedByTheirReference() throws Exception {
+		OrderSync sync = new OrderSync(List.of(new EventLog.OrderRecord(7001, 7, "4", Instrument.stock("SPY", "SMART", "USD"), "2026-10-13T12:00:00Z")));
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
+		state.sync = sync;
+		com.ib.client.Order done = withRef("INV#7001#4");
+		done.filledQuantity(Decimal.get(BigDecimal.valueOf(30)));
+		callbacks.completedOrder(Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), done, stateOf("Filled"));
+		callbacks.completedOrder(Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), withRef("not ours"), stateOf("Filled"));
+		callbacks.openOrderEnd();
+		callbacks.completedOrdersEnd();
+		assertTrue(sync.await(50, 50));
+		assertEquals(1, sync.conclude(state, hub));
+		List<String[]> ev = drain();
+		assertEquals("Filled", json(ev.get(0)[1]).get("status").asText());
+		assertEquals(30.0, json(ev.get(0)[1]).get("filled").asDouble());
+		assertEquals(0.0, json(ev.get(0)[1]).get("remaining").asDouble());
+	}
+
+	/** After a lost journal an execution of an order the bridge has no record of finds its order in the reference the broker returns with it. */
+	@Test
+	void anExecutionOfAnOrderTheBridgeHasNoRecordOfIsDeliveredFromItsOrderReference() throws Exception {
+		Execution e = new Execution(7, 11, "0003.01", "20261002 10:00:00 US/Eastern", "DU1234567", "ARCA", "BOT",
+				Decimal.get(BigDecimal.valueOf(100)), 500.1, 99L, 0, Decimal.get(BigDecimal.valueOf(100)), 500.1, "INV#7001#4",
+				"", 0, "", null, false, null, null);
+		callbacks.execDetails(-1, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), e);
+		List<String[]> ev = drain();
+		assertEquals(1, ev.size());
+		assertEquals("fill", ev.get(0)[0]);
+		assertEquals(7001, json(ev.get(0)[1]).get("clientOrderId").asInt());
+		assertEquals("4", json(ev.get(0)[1]).get("tag").asText());
+		assertEquals("SPY", json(ev.get(0)[1]).get("instrument").get("symbol").asText());
+		assertEquals(7001L, state.ordersByIbId.get(7).clientOrderId());
+		// an execution of another shape is dropped, and its fill id is not used up
+		Execution foreign = new Execution(8, 11, "0004.01", "20261002 10:00:00 US/Eastern", "DU1234567", "ARCA", "BOT",
+				Decimal.get(BigDecimal.valueOf(1)), 500.1, 99L, 0, Decimal.get(BigDecimal.valueOf(1)), 500.1, "INV",
+				"", 0, "", null, false, null, null);
+		callbacks.execDetails(-1, Contracts.toIb(Instrument.stock("SPY", "SMART", "USD")), foreign);
+		assertTrue(drain().isEmpty());
+		assertTrue(hub.eventLog().firstFill("0004.01"), "a fill that was dropped can still be delivered once its order is known");
 	}
 
 	@Test

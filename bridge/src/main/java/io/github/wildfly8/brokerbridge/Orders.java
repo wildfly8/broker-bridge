@@ -49,7 +49,8 @@ final class Orders {
 		}
 		o.tif(tif);
 		o.allOrNone(Boolean.TRUE.equals(r.allOrNone()));
-		o.orderRef(r.orderRef());
+		// the broker returns the reference with the order whenever it reports it: it carries the client order id and the tag (OrderRefs)
+		o.orderRef(r.clientOrderId() == null ? r.orderRef() : OrderRefs.encode(r.orderRef(), r.clientOrderId(), r.tag()));
 		o.transmit(true);
 		return o;
 	}

@@ -86,6 +86,10 @@ class IbConnectionLockTest {
 		IbConnection conn = new IbConnection(config, ib, state, hub, broker, backoff, backoff);
 		callbacks.listener(conn);
 		ib.connection = conn;
+		ib.onOpenOrders = () -> {
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
 		return conn;
 	}
 

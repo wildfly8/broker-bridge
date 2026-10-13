@@ -247,6 +247,11 @@ class BridgeHttpServerTest {
 		assertEquals(202, r.statusCode(), r.body());
 		assertEquals(7001, json(r).get("clientOrderId").asLong());
 		assertTrue(ib.calls.contains("placeOrder 10 BUY 100 LMT 500.0"), ib.calls.toString());
+		assertEquals("#7001#4", ib.orders.get(0).orderRef(), "IB gets the reference with the client order id and the tag");
+		EventLog.OrderRecord recorded = hub.eventLog().orders().get(0);
+		assertTrue(recorded.placedAt() != null && java.time.Instant.parse(recorded.placedAt()) != null, "the record has its placement time");
+		assertEquals(java.util.List.of(7001L), hub.eventLog().unfinishedOrders().stream().map(EventLog.OrderRecord::clientOrderId).toList(),
+				"an order with no status yet is one the bridge has not seen end");
 		assertEquals(409, send("POST", "/v1/orders", order(7001L, false)).statusCode());
 		assertEquals(202, send("POST", "/v1/orders", order(7001L, true)).statusCode());
 		assertEquals(2, ib.calls.stream().filter(c -> c.startsWith("placeOrder 10 ")).count());

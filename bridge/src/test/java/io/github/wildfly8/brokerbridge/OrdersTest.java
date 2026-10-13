@@ -29,8 +29,18 @@ class OrdersTest {
 		assertEquals(500.0, o.lmtPrice());
 		assertEquals("DAY", o.getTif());
 		assertTrue(o.allOrNone());
-		assertEquals("ref-1", o.orderRef());
+		assertEquals("ref-1#7001#4", o.orderRef(), "the reference carries the client order id and the tag");
 		assertTrue(o.transmit());
+	}
+
+	@Test
+	void theReferenceSentToTheBrokerCarriesTheClientOrderIdAndTheTagEvenWhenThereIsNoReference() {
+		OrderRequest bare = new OrderRequest(7002L, null, Instrument.stock("SPY", "SMART", "USD"), "BUY", 1.0, "MARKET", null, null, null, null, null, null);
+		assertEquals("#7002#", Orders.toIb(bare, 1).orderRef());
+		OrderRequest tagged = new OrderRequest(7003L, "a#b", Instrument.stock("SPY", "SMART", "USD"), "BUY", 1.0, "MARKET", null, null, null, null, "INV", null);
+		assertEquals("INV#7003#a%23b", Orders.toIb(tagged, 1).orderRef());
+		OrderRequest tooLong = new OrderRequest(7004L, "x".repeat(130), Instrument.stock("SPY", "SMART", "USD"), "BUY", 1.0, "MARKET", null, null, null, null, "INV", null);
+		assertEquals(400, assertThrows(ApiException.class, () -> Orders.toIb(tooLong, 1)).status());
 	}
 
 	@Test

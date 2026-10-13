@@ -29,6 +29,9 @@ final class IbConnection implements IbCallbacks.SessionListener {
 	private final BrokerService broker;
 	private final Duration minBackoff;
 	private final Duration maxBackoff;
+	/** How long a connection waits for the broker's lists of open and of completed orders ({@link OrderSync}); tests shorten them. */
+	private final long openOrdersTimeoutMs;
+	private final long completedOrdersTimeoutMs;
 	/** Guards {@link #signalled}; no call into the client and no other lock while it is held. */
 	private final Object wake = new Object();
 	/** A {@link #closed()} or {@link #stop()} the loop has not looked at yet. */
@@ -42,6 +45,13 @@ final class IbConnection implements IbCallbacks.SessionListener {
 
 	IbConnection(BridgeConfig config, IbClient client, BridgeState state, EventHub hub, BrokerService broker,
 			Duration minBackoff, Duration maxBackoff) {
+		this(config, client, state, hub, broker, minBackoff, maxBackoff, OrderSync.OPEN_TIMEOUT_MS, OrderSync.COMPLETED_TIMEOUT_MS);
+	}
+
+	IbConnection(BridgeConfig config, IbClient client, BridgeState state, EventHub hub, BrokerService broker,
+			Duration minBackoff, Duration maxBackoff, long openOrdersTimeoutMs, long completedOrdersTimeoutMs) {
+		this.openOrdersTimeoutMs = openOrdersTimeoutMs;
+		this.completedOrdersTimeoutMs = completedOrdersTimeoutMs;
 		this.config = config;
 		this.client = client;
 		this.state = state;
@@ -162,14 +172,24 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		}
 		client.reqMarketDataType(config.marketDataType());
 		client.reqIds();
+		// Ask the broker what it still holds open and has completed, not only wait to be told. The orders the journal does not know to
+		// have ended are armed first, so that an order placed later is not taken for one the broker no longer has; the lists come before the
+		// executions, so that an execution of an order the journal lacks finds its order reference in the maps
+		OrderSync sync = new OrderSync(hub.eventLog().unfinishedOrders());
+		state.sync = sync;
+		client.reqOpenOrders();
+		client.reqCompletedOrders(true);
 		// fills made while the bridge was disconnected; already-delivered ones are dropped by fill id
 		client.reqExecutions(state.newRequestId(), config.ibClientId());
 		if (dropped || !client.isConnected()) {
+			state.sync = null;
 			return dropHandshake();
 		}
 		// Restore streams before the session is marked up. A reader that sees connected
 		// otherwise races the resubscribe that follows the flag.
 		broker.resubscribe();
+		// the session takes orders only when the bridge has seen the broker's lists: what they say goes out as order events first
+		readOrders(sync);
 		if (dropped || !client.isConnected()) {
 			return dropHandshake();
 		}
@@ -178,6 +198,19 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		log.info("Connected to IB, server version {}", client.serverVersion());
 		hub.publish("connection", broker.status());
 		return true;
+	}
+
+	/** Waits for the broker's lists of open and completed orders and gives the orders they do not list their final status ({@link OrderSync#conclude}). */
+	private void readOrders(OrderSync sync) {
+		try {
+			if (sync.await(openOrdersTimeoutMs, completedOrdersTimeoutMs) && !dropped) {
+				sync.conclude(state, hub);
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		} finally {
+			state.sync = null;
+		}
 	}
 
 	/** The Gateway closed the socket during the handshake. Release the client id and do not mark the session up. */
@@ -200,6 +233,10 @@ final class IbConnection implements IbCallbacks.SessionListener {
 	@Override
 	public void closed() {
 		dropped = true;
+		OrderSync reading = state.sync;
+		if (reading != null) {
+			reading.abort();
+		}
 		signal();
 	}
 

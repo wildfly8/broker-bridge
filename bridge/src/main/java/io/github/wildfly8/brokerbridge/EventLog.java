@@ -48,7 +48,15 @@ final class EventLog implements AutoCloseable {
 
 	record Entry(long id, String event, String json) {}
 
-	record OrderRecord(long clientOrderId, int brokerOrderId, String tag, Instrument instrument) {}
+	/**
+	 * {@code placedAt}: when the bridge entered the order (ISO instant), or null for a record from before it was kept. Only the records that
+	 * have one, or whose status the kept events still know, can be concluded to have ended without a status ({@link #unfinishedOrders}).
+	 */
+	record OrderRecord(long clientOrderId, int brokerOrderId, String tag, Instrument instrument, String placedAt) {
+		OrderRecord(long clientOrderId, int brokerOrderId, String tag, Instrument instrument) {
+			this(clientOrderId, brokerOrderId, tag, instrument, null);
+		}
+	}
 
 	private final int maxKept;
 	/** Order records kept before the oldest ended ones go; and the most that are kept when none has ended ({@link #MAX_ORDERS_OPEN}). */
@@ -171,6 +179,32 @@ final class EventLog implements AutoCloseable {
 
 	synchronized List<OrderRecord> orders() {
 		return new ArrayList<>(orders.values());
+	}
+
+	/** Whether the latest status the kept events have for the order is a final one. */
+	synchronized boolean isFinal(long clientOrderId) {
+		return isFinalStatus(lastStatus.get(clientOrderId));
+	}
+
+	/** Whether the order does not work after this status. */
+	static boolean isFinalStatus(String status) {
+		return status != null && FINAL_STATUSES.contains(status);
+	}
+
+	/**
+	 * The orders that may still work as far as the bridge knows: those whose latest status is not final, and those that have no
+	 * status yet and were entered with a placement time. An order from before the placement time was kept and without a status among the kept
+	 * events is old as likely as it is unseen, and is not listed.
+	 */
+	synchronized List<OrderRecord> unfinishedOrders() {
+		List<OrderRecord> out = new ArrayList<>();
+		for (OrderRecord o : orders.values()) {
+			String status = lastStatus.get(o.clientOrderId());
+			if (status != null ? !FINAL_STATUSES.contains(status) : o.placedAt() != null) {
+				out.add(o);
+			}
+		}
+		return out;
 	}
 
 	/** True the first time a fill id is seen (in this run or in the journal). */
