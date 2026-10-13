@@ -171,9 +171,10 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
 - **Streams a client left behind.** The bridge keeps every streaming subscription until it is told to cancel it, and subscribes
   it again after each reconnect of the broker, so the streams of a client that was stopped hard go on sending quotes, and each
   holds one of the account's market-data lines (IB's default is 100). A client that marks its streams with an `owner` (a run id
-  of its own) can list them (`GET /v1/subscriptions`) and cancel the ones that are not its own with `DELETE`; `eventClients` tells
-  whether another client is attached to the event stream, which may be a run that is still going and whose streams would be taken
-  away.
+  of its own, with a prefix of its own) can list them (`GET /v1/subscriptions`) and cancel the streams of its own earlier runs with
+  `DELETE`. The bridge is shared: a stream that carries another client's mark is left alone (that client may be reconnecting at
+  this instant), and so is every stream of a run that is still going; `eventClients` tells whether another client is attached to
+  the event stream, which may be a run of the caller's own whose streams would be taken away.
 - Order ids: the caller's `clientOrderId` is mapped to the broker's order id inside the bridge; status, fills and order
   errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
   earlier orders still arrive after a bridge restart. A broker order id that belongs to another order is never used
