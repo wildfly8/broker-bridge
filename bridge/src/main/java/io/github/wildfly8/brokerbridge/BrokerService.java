@@ -167,6 +167,9 @@ final class BrokerService {
 			throw new ApiException(400, "clientOrderId is required");
 		}
 		Contract contract = Contracts.toIb(r.instrument());
+		// everything the request can be refused for by itself (400) comes before a client id or a broker id is claimed: a refusal after the
+		// claim left the client id used (the same request, corrected, was refused as used) and the broker id booked to an order that was never sent
+		com.ib.client.Order order = Orders.toIb(r, 0);
 		requireConnected();
 		requireLink("order " + r.clientOrderId());
 		long clientOrderId = r.clientOrderId();
@@ -206,7 +209,7 @@ final class BrokerService {
 			}
 			state.orderIdFloor.accumulateAndGet(ibId + 1, Math::max);
 		}
-		com.ib.client.Order order = Orders.toIb(r, ibId);
+		order.orderId(ibId);
 		state.ordersByIbId.put(ibId, new OrderRef(clientOrderId, r.tag(), r.instrument()));
 		state.ibIdByClientOrderId.put(clientOrderId, ibId);
 		if (!Boolean.TRUE.equals(r.modify())) {

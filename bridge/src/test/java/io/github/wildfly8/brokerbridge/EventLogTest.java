@@ -220,6 +220,32 @@ class EventLogTest {
 		assertFalse(log.isFinal(99), "an order the log has never heard of");
 	}
 
+	/**
+	 * An order with a record and no status among the kept events is either one placed just before the bridge stopped or an old one whose events
+	 * left the replay window; only the newest are armed, so that the old ones are not each given a status at the next connection.
+	 */
+	@Test
+	void onlyTheNewestOrdersWithoutAStatusAreListedAsUnfinished() {
+		EventLog log = EventLog.inMemory(1000, 5_000L);
+		Instrument spy = Instrument.stock("SPY", "SMART", "USD");
+		int unseen = EventLog.MAX_ARMED_WITHOUT_STATUS + 5;
+		log.recordOrder(new EventLog.OrderRecord(1, 11, "1", spy, "2026-10-13T12:00:00Z"));
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 1, "status", "Submitted"));
+		for (int i = 0; i < unseen; i++) {
+			log.recordOrder(new EventLog.OrderRecord(100 + i, 1000 + i, "1", spy, "2026-10-13T12:00:00Z"));
+		}
+		log.recordOrder(new EventLog.OrderRecord(2, 12, "1", spy, "2026-10-13T12:00:00Z"));
+		log.keepOrderEvent(log.nextId(), "order-status", Map.of("clientOrderId", 2, "status", "Submitted"));
+
+		List<Long> ids = log.unfinishedOrders().stream().map(EventLog.OrderRecord::clientOrderId).toList();
+		assertEquals(2 + EventLog.MAX_ARMED_WITHOUT_STATUS, ids.size(), "the working ones, whatever their age, and the newest without a status");
+		assertEquals(1L, ids.get(0), "an order with a working status is listed whatever its age");
+		assertEquals(105L, ids.get(1), "the five oldest without a status are not listed");
+		assertEquals(100L + unseen - 1, ids.get(ids.size() - 2));
+		assertEquals(2L, ids.get(ids.size() - 1));
+		assertEquals(100, EventLog.MAX_ARMED_WITHOUT_STATUS);
+	}
+
 	@Test
 	void thePlacementTimeSurvivesARestartAndAJournalLineWithoutOneReadsAsNone() throws Exception {
 		try (EventLog log = EventLog.open(dir, 100, 5_000L)) {

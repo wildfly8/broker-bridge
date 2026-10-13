@@ -314,18 +314,66 @@ class BridgeHttpServerTest {
 		assertEquals(7001, json(r).get("clientOrderId").asLong());
 		assertTrue(ib.calls.contains("placeOrder 10 BUY 100 LMT 500.0"), ib.calls.toString());
 		assertEquals("#7001#4", ib.orders.get(0).orderRef(), "IB gets the reference with the client order id and the tag");
+		assertEquals(10, ib.orders.get(0).orderId(), "and the order carries the broker id it was claimed under");
 		EventLog.OrderRecord recorded = hub.eventLog().orders().get(0);
 		assertTrue(recorded.placedAt() != null && java.time.Instant.parse(recorded.placedAt()) != null, "the record has its placement time");
 		assertEquals(java.util.List.of(7001L), hub.eventLog().unfinishedOrders().stream().map(EventLog.OrderRecord::clientOrderId).toList(),
 				"an order with no status yet is one the bridge has not seen end");
 		assertEquals(409, send("POST", "/v1/orders", order(7001L, false)).statusCode());
 		assertEquals(202, send("POST", "/v1/orders", order(7001L, true)).statusCode());
+		assertEquals(10, ib.orders.get(1).orderId(), "a modification carries the same broker id");
 		assertEquals(2, ib.calls.stream().filter(c -> c.startsWith("placeOrder 10 ")).count());
 		assertEquals(404, send("POST", "/v1/orders", order(7002L, true)).statusCode());
 		assertEquals(202, send("DELETE", "/v1/orders/7001", null).statusCode());
 		assertTrue(ib.calls.contains("cancelOrder 10"));
 		assertEquals(404, send("DELETE", "/v1/orders/9999", null).statusCode());
 		assertEquals(11, state.nextOrderId.get());
+	}
+
+	/**
+	 * An order refused for what it says (400) claims nothing: its client order id stays free, no broker id is used and no record is kept, so
+	 * the same request corrected is taken (it used to be refused as used), and a cancel of the refused one is an unknown id and goes nowhere.
+	 */
+	@Test
+	void anOrderRefusedForWhatItSaysClaimsNothing() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		String[] bad = {
+				order(7001L, false).replace("\"quantity\":100", "\"quantity\":0"),
+				order(7001L, false).replace("\"type\":\"LIMIT\"", "\"type\":\"ICEBERG\""),
+				order(7001L, false).replace("\"timeInForce\":\"DAY\"", "\"timeInForce\":\"FOK\""),
+				order(7001L, false).replace(",\"limitPrice\":500.0", ""),
+				order(7001L, false).replace("\"side\":\"BUY\"", "\"side\":\"HOLD\""),
+				order(7001L, false).replace("\"tag\":\"4\"", "\"tag\":\"" + "t".repeat(OrderRefs.MAX_LENGTH) + "\"") };
+		for (String body : bad) {
+			HttpResponse<String> r = send("POST", "/v1/orders", body);
+			assertEquals(400, r.statusCode(), body + " " + r.body());
+			assertTrue(state.ibIdByClientOrderId.isEmpty(), "no client id was claimed: " + body);
+			assertTrue(state.ordersByIbId.isEmpty(), "no broker id was booked: " + body);
+			assertEquals(10, state.nextOrderId.get(), "no broker id was used: " + body);
+			assertEquals(0, state.orderIdFloor.get(), "the floor did not move: " + body);
+			assertTrue(hub.eventLog().orders().isEmpty(), "no record was kept: " + body);
+		}
+		assertEquals(0, ib.count("placeOrder"));
+		assertEquals(404, send("DELETE", "/v1/orders/7001", null).statusCode(), "a refused order is not one to cancel");
+		assertEquals(0, ib.count("cancelOrder"));
+
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode(), "the same client id, corrected, is taken");
+		assertTrue(ib.calls.contains("placeOrder 10 BUY 100 LMT 500.0"), "and gets the first broker id: " + ib.calls);
+		assertEquals(11, state.nextOrderId.get());
+	}
+
+	/** A modification refused for what it says leaves the order as it was: still known under its broker id, and not sent. */
+	@Test
+	void aModificationRefusedForWhatItSaysLeavesTheOrderAsItWas() throws Exception {
+		start(true, true);
+		state.nextOrderId.set(10);
+		assertEquals(202, send("POST", "/v1/orders", order(7001L, false)).statusCode());
+		assertEquals(400, send("POST", "/v1/orders", order(7001L, true).replace("\"quantity\":100", "\"quantity\":-5")).statusCode());
+		assertEquals(10, state.ibIdByClientOrderId.get(7001L));
+		assertEquals(1, ib.count("placeOrder"));
+		assertEquals(202, send("DELETE", "/v1/orders/7001", null).statusCode());
+		assertTrue(ib.calls.contains("cancelOrder 10"));
 	}
 
 	/**

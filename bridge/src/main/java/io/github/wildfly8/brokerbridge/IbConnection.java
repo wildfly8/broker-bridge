@@ -116,6 +116,7 @@ final class IbConnection implements IbCallbacks.SessionListener {
 			} catch (Throwable t) {
 				// A loop that ends is a bridge that never reconnects, and nothing says so: keep going.
 				log.error("IB connection loop failed, trying again: {}", t.toString(), t);
+				releaseUnmarkedSession();
 				try {
 					backoff = pause(backoff);
 				} catch (InterruptedException e) {
@@ -158,6 +159,8 @@ final class IbConnection implements IbCallbacks.SessionListener {
 
 	private boolean connect() {
 		dropped = false;
+		// a session starts with IB's link to its servers up: only what IB reports from here on, the reading of the orders included, takes it down
+		state.link(true);
 		log.info("Connecting to IB at {}:{} as client {}", config.ibHost(), config.ibPort(), config.ibClientId());
 		try {
 			if (!client.connect(config.ibHost(), config.ibPort(), config.ibClientId())) {
@@ -216,6 +219,10 @@ final class IbConnection implements IbCallbacks.SessionListener {
 	/** The Gateway closed the socket during the handshake. Release the client id and do not mark the session up. */
 	private boolean dropHandshake() {
 		log.warn("IB dropped the handshake; waiting before another attempt");
+		return dropSession();
+	}
+
+	private boolean dropSession() {
 		try {
 			client.disconnect();
 		} catch (RuntimeException e) {
@@ -223,6 +230,23 @@ final class IbConnection implements IbCallbacks.SessionListener {
 		}
 		state.connected(false, null);
 		return false;
+	}
+
+	/**
+	 * The loop connects only when the client says it is not connected, so a socket that stays open after a failure between the handshake and the
+	 * marking up (the session is never marked up, every request is refused with 503, and the loop waits for a drop that does not come) would
+	 * never be tried again: the connection is closed, and the next attempt starts clean after the backoff.
+	 */
+	private void releaseUnmarkedSession() {
+		try {
+			if (client.isConnected() && !state.connected()) {
+				log.warn("IB session left open without being marked up; closing it");
+				state.sync = null;
+				dropSession();
+			}
+		} catch (RuntimeException e) {
+			log.warn("IB session could not be closed after the failure: {}", e.toString());
+		}
 	}
 
 	/** Test seam: whether the calling thread holds the lock of the connection loop. */

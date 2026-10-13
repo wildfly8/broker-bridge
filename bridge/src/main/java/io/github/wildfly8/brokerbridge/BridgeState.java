@@ -67,9 +67,11 @@ final class BridgeState {
 		}
 		connected = up;
 		serverVersion = up ? version : null;
-		// a new session, or none, says nothing about a link that was lost on the old one
-		linkDownSince = null;
 		if (!up) {
+			// no session says nothing about a link that was lost on the old one. A session that is marked up keeps what IB told it while it was
+			// being set up (the reading of the orders takes seconds): the connection starts with the link up (link(true)), and marking it up
+			// does not say so again
+			linkDownSince = null;
 			dataFarms.clear();
 			nextOrderId.set(-1);
 		}

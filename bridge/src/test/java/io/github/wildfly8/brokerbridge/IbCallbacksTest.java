@@ -442,6 +442,22 @@ class IbCallbacksTest {
 		assertTrue(state.linkUp(), "a restore without a loss is nothing");
 	}
 
+	/** Marking a session up does not say the link is up: IB may have said otherwise while the session was being set up; no session at all does. */
+	@Test
+	void markingTheSessionUpKeepsALossOfTheLinkAndTheEndOfTheSessionClearsIt() {
+		state.link(false);
+		java.time.Instant since = state.linkDownSince();
+		state.connected(true, 222);
+		assertFalse(state.linkUp(), "what IB reported before the session was marked up stands");
+		assertSame(since, state.linkDownSince());
+		state.connected(true, 222);
+		assertSame(since, state.linkDownSince(), "and stays the time of the first report");
+		state.connected(false, null);
+		assertTrue(state.linkUp(), "no session says nothing about a link that was lost on the old one");
+		state.connected(true, 222);
+		assertTrue(state.linkUp());
+	}
+
 	@Test
 	void sessionEvents() throws Exception {
 		AtomicBoolean closed = new AtomicBoolean();

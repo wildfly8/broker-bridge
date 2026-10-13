@@ -76,14 +76,14 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 
 | Method | Path | Body → response |
 |---|---|---|
-| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt, durable, linkUp}` (`startedAt` changes only when the bridge restarts; `durable`: the order events are journaled on disk, so a restart keeps them; `linkUp`: false from IB's error 1100 until 1101 or 1102 or a new connection, because IB's own link to the broker's servers can be lost while the socket to the Gateway stays open; orders, modifications and cancels get a retryable 503 meanwhile) |
+| GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt, durable, linkUp}` (`startedAt` changes only when the bridge restarts; `durable`: the order events are journaled on disk, so a restart keeps them; `linkUp`: false from IB's error 1100 until 1101 or 1102 or until the connection is made anew, because IB's own link to the broker's servers can be lost while the socket to the Gateway stays open; a connection starts with the link up, and an 1100 that IB reports while the connection is being set up (the reading of the orders takes seconds) stands when the session is marked up; orders, modifications and cancels get a retryable 503 meanwhile) |
 | POST | `/v1/subscriptions` | `{instrument, tag, snapshot, genericTicks, owner}` → `{subscriptionId}` · 503 disconnected (`owner` is optional: an opaque mark of whoever opened the stream, listed back by the route below) |
 | GET | `/v1/subscriptions` | → `{subscriptions: [{subscriptionId, tag, owner, instrument, snapshot, genericTicks}], eventClients}`: the streams the bridge holds, by id (`owner` and `genericTicks` left out when there are none), and the number of clients attached to `/v1/events` now, the caller's own included; needs neither the broker nor a token |
 | DELETE | `/v1/subscriptions/{id}` | → 204 |
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
 | POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing, with `Retry-After` when the broker named a wait |
 | POST | `/v1/contracts/resolve` | `{instrument}` → `{instrument, marketName, minTick, priceMagnifier, orderTypes, validExchanges}` · 404 none |
-| POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 (handed to IB's client: not an acknowledgement, the order's `order-status` events are) · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected, or IB's link to its servers is down (`linkUp`) |
+| POST | `/v1/orders` | `{clientOrderId, tag, instrument, side, quantity, type: LIMIT|MARKET|STOP|STOP_LIMIT|LIMIT_IF_TOUCHED, limitPrice, stopPrice (also the touch price), timeInForce: DAY|GTC|IOC, allOrNone, orderRef, modify}` → 202 (handed to IB's client: not an acknowledgement, the order's `order-status` events are) · 400 the order is wrong by itself (quantity, type, time in force, side, a price, a reference over 128 characters): nothing is claimed or sent, so the same `clientOrderId` can be sent again corrected · 401 token missing or wrong (when one is configured) · 403 disabled · 409 duplicate id · 503 disconnected, or IB's link to its servers is down (`linkUp`) |
 | DELETE | `/v1/orders/{clientOrderId}` | → 202 (also with `BRIDGE_ORDERS_ENABLED=false`: a cancel is not an order) · 401 token missing or wrong (when one is configured) · 404 unknown · 503 disconnected, or IB's link to its servers is down |
 | GET | `/v1/events` | `text/event-stream`: `connection`, `quote`, `snapshot-end`, `order-status`, `fill`, `error`; `: heartbeat` every 15 s |
 
@@ -152,15 +152,20 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
   order that the broker lists and the bridge has no record of (its journal was lost) is entered again from the reference
   it carries, with its client id, tag and instrument, and so is the order of an execution; a reference of another shape
   (an order of an older bridge, one typed into the broker's own application) is left alone. An order that the bridge had
-  not seen end (its latest kept status is not final, or it has none and the bridge recorded when it was placed) and that
-  the broker lists neither open nor completed gets a final `order-status` before `connected` is announced: the status the
+  not seen end (its latest kept status is not final, or it has none and the bridge recorded when it was placed; of those with
+  none only the newest 100 are looked for, since an older one is an order whose events left the replay window, not an
+  unseen one) and that the broker lists neither open nor completed gets a final `order-status` before `connected` is announced: the status the
   broker gave it among its completed orders (`Filled` or `Cancelled`, with `filled` and `remaining`, `whyHeld` saying that
   the broker listed it as completed), otherwise `Inactive` with `whyHeld` "not among IB's open orders when the bridge
   connected". If the broker does not end its list of open orders in time the bridge goes on, concludes nothing and says so
   in its log. Limits: the broker reports executions since midnight only, so a fill made before midnight while the bridge was
   away is not recovered (the order's final status is, and its `filled` shows what it came to); orders placed under another
   `IB_CLIENT_ID` are not listed for this client and would be concluded `Inactive`: cancel them in the broker's own
-  application before changing the client id.
+  application before changing the client id; a list of completed orders that ends after the 3 s is not read, so the orders
+  it lists get `Inactive` as the ones it does not list do; and an order of an older bridge (its reference has no client
+  order id in it) is not recognised in that list either. A failure of the bridge's own between the handshake and the
+  marking up closes the socket, and the next attempt follows the backoff: a socket left open without a session marked up
+  would never be tried again.
 - **Streams a client left behind.** The bridge keeps every streaming subscription until it is told to cancel it, and subscribes
   it again after each reconnect of the broker, so the streams of a client that was stopped hard go on sending quotes, and each
   holds one of the account's market-data lines (IB's default is 100). A client that marks its streams with an `owner` (a run id

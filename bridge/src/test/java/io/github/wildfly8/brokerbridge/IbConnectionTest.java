@@ -2,6 +2,7 @@ package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
@@ -228,6 +229,206 @@ class IbConnectionTest {
 			waitFor(state::connected);
 			assertEquals(2, asked.get());
 			assertTrue(hub.eventLog().isFinal(7001), "the next reading ended the order");
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/**
+	 * A failure between the handshake and the marking up used to leave the socket open: the loop connects only when the client says it is not
+	 * connected, so the session was never marked up, every request got a 503, and nothing tried again until the Gateway closed the socket.
+	 */
+	@Test
+	void aFailureAfterTheHandshakeClosesTheSocketAndTheNextAttemptConnects() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		FakeIbClient ib = new FakeIbClient();
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+		callbacks.listener(conn);
+		java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+		ib.onOpenOrders = () -> {
+			if (asked.incrementAndGet() == 1) {
+				callbacks.nextValidId(10);
+				throw new IllegalStateException("the first reading fails");
+			}
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(() -> ib.calls.contains("disconnect"));
+			assertFalse(ib.isConnected(), "the socket is closed");
+			assertFalse(state.connected());
+			assertNull(state.sync, "no reading is left armed");
+			waitFor(() -> state.nextOrderId.get() == -1);
+			assertEquals(1, ib.connectAttempts, "the next attempt waits the backoff");
+			waitFor(state::connected);
+			assertEquals(2, ib.connectAttempts);
+			assertEquals(2, asked.get());
+			assertTrue(ib.isConnected());
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** A failure after the session is marked up leaves the session alone: only a socket without a marked-up session is closed. */
+	@Test
+	void aFailureAfterTheSessionIsMarkedUpLeavesTheSessionAlone() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		java.util.concurrent.atomic.AtomicInteger versionAsked = new java.util.concurrent.atomic.AtomicInteger();
+		FakeIbClient ib = new FakeIbClient() {
+			/** Asked once to mark the session up and once for the log line that follows: the second answer fails. */
+			@Override
+			public int serverVersion() {
+				if (versionAsked.incrementAndGet() == 2) {
+					throw new IllegalStateException("the second ask fails");
+				}
+				return super.serverVersion();
+			}
+		};
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
+		callbacks.listener(conn);
+		ib.onOpenOrders = () -> {
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(() -> versionAsked.get() >= 2);
+			Thread.sleep(250);
+			assertTrue(state.connected(), "the session was marked up before the failure");
+			assertTrue(ib.isConnected());
+			assertEquals(1, ib.connectAttempts, "a marked-up session is not reconnected");
+			assertEquals(0, ib.count("disconnect"));
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** IB's error 1100 reported while the orders are read is not erased by marking the session up: the link is down until 1101 or 1102. */
+	@Test
+	void aLossOfIbsLinkReportedWhileTheOrdersAreReadStandsWhenTheSessionIsMarkedUp() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		EventHub.Client events = hub.register();
+		FakeIbClient ib = new FakeIbClient();
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
+		callbacks.listener(conn);
+		ib.onOpenOrders = () -> {
+			callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(state::connected);
+			assertFalse(state.linkUp(), "orders must not go out while IB's link is down");
+			assertFalse(broker.status().linkUp());
+			String seen = drainUntilConnected(hub, events);
+			String announced = seen.substring(seen.lastIndexOf("\"connected\":true"));
+			assertTrue(announced.contains("\"linkUp\":false"), "the connection event says so: " + seen);
+			callbacks.error(-1, 0L, 1102, "Connectivity between IB and TWS has been restored- data maintained.", null);
+			assertTrue(state.linkUp());
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** The same loss, reported in the window between the handshake and the reading of the orders. */
+	@Test
+	void aLossOfIbsLinkReportedRightAfterTheHandshakeStandsWhenTheSessionIsMarkedUp() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		FakeIbClient ib = new FakeIbClient();
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
+		callbacks.listener(conn);
+		ib.onConnect = () -> callbacks.error(-1, 0L, 1100, "Connectivity between IBKR and Trader Workstation has been lost.", null);
+		ib.onOpenOrders = () -> {
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(state::connected);
+			assertFalse(state.linkUp(), "orders must not go out while IB's link is down");
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** A failure while there is no socket has nothing to close, and does not end the loop. */
+	@Test
+	void aFailureBeforeTheSocketIsOpenClosesNothingAndTheLoopGoesOn() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+		FakeIbClient ib = new FakeIbClient() {
+			@Override
+			public boolean connect(String host, int port, int clientId) {
+				if (attempts.incrementAndGet() == 1) {
+					throw new AssertionError("an error, not an exception: nothing catches it before the loop does");
+				}
+				return super.connect(host, port, clientId);
+			}
+		};
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
+		callbacks.listener(conn);
+		ib.onOpenOrders = () -> {
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+
+		conn.start();
+		try {
+			waitFor(state::connected);
+			assertEquals(2, attempts.get());
+			assertEquals(0, ib.count("disconnect"), "there was no socket to close");
+		} finally {
+			conn.stop();
+		}
+	}
+
+	/** What an earlier attempt was told about the link says nothing about the next session: it starts with the link up. */
+	@Test
+	void aSessionStartsWithTheLinkUpWhateverAnEarlierAttemptWasTold() throws Exception {
+		BridgeConfig config = BridgeConfig.fromEnv(java.util.Map.of());
+		BridgeState state = new BridgeState();
+		EventHub hub = new EventHub(EventLog.inMemory(1000, System.currentTimeMillis()));
+		FakeIbClient ib = new FakeIbClient();
+		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
+		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(20), Duration.ofMillis(80));
+		callbacks.listener(conn);
+		ib.onOpenOrders = () -> {
+			callbacks.openOrderEnd();
+			callbacks.completedOrdersEnd();
+		};
+		state.link(false);
+
+		conn.start();
+		try {
+			waitFor(state::connected);
+			assertTrue(state.linkUp());
 		} finally {
 			conn.stop();
 		}
