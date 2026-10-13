@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
@@ -106,6 +107,56 @@ class BridgeHttpServerTest {
 		assertEquals(204, send("DELETE", "/v1/subscriptions/" + id, null).statusCode());
 		assertTrue(ib.calls.contains("cancelMktData " + id));
 		assertFalse(state.subscriptions.containsKey(id));
+	}
+
+	/** A client can tell its own streams from those an earlier run of it left: each stream is listed with the mark it was opened with. */
+	@Test
+	void theStreamsTheBridgeHoldsAreListedWithTheirOwnersAndTheNumberOfClientsOfTheEventStream() throws Exception {
+		start(false, true);
+		JsonNode empty = json(send("GET", "/v1/subscriptions", null));
+		assertEquals(0, empty.get("subscriptions").size());
+		assertEquals(0, empty.get("eventClients").asInt());
+		int a = json(send("POST", "/v1/subscriptions", "{\"instrument\":" + SPY + ",\"tag\":\"2\",\"genericTicks\":\"100\",\"owner\":\"run-A\"}")).get("subscriptionId").asInt();
+		int b = json(send("POST", "/v1/subscriptions", "{\"instrument\":" + SPY + ",\"tag\":\"3\"}")).get("subscriptionId").asInt();
+		int c = json(send("POST", "/v1/subscriptions", "{\"instrument\":" + SPY + ",\"tag\":\"4\",\"snapshot\":true,\"owner\":\"run-B\"}")).get("subscriptionId").asInt();
+		HttpResponse<String> r = send("GET", "/v1/subscriptions", null);
+		assertEquals(200, r.statusCode(), r.body());
+		assertEquals("application/json", r.headers().firstValue("Content-Type").orElse(null));
+		JsonNode list = json(r).get("subscriptions");
+		assertEquals(3, list.size());
+		assertTrue(a < b && b < c);
+		assertEquals(a, list.get(0).get("subscriptionId").asInt(), "by id");
+		assertEquals("2", list.get(0).get("tag").asText());
+		assertEquals("run-A", list.get(0).get("owner").asText());
+		assertEquals("SPY", list.get(0).get("instrument").get("symbol").asText());
+		assertFalse(list.get(0).get("snapshot").asBoolean());
+		assertEquals("100", list.get(0).get("genericTicks").asText());
+		assertEquals(b, list.get(1).get("subscriptionId").asInt());
+		assertFalse(list.get(1).has("owner"), "a stream opened without a mark has none");
+		assertFalse(list.get(1).has("genericTicks"));
+		assertEquals(c, list.get(2).get("subscriptionId").asInt());
+		assertEquals("run-B", list.get(2).get("owner").asText());
+		assertTrue(list.get(2).get("snapshot").asBoolean());
+		// the clients attached to the event stream are counted
+		EventHub.Client attached = hub.register();
+		EventHub.Client another = hub.register();
+		assertEquals(2, json(send("GET", "/v1/subscriptions", null)).get("eventClients").asInt());
+		hub.unregister(attached);
+		hub.unregister(another);
+		assertEquals(0, json(send("GET", "/v1/subscriptions", null)).get("eventClients").asInt());
+		// a stream that is cancelled leaves the list
+		assertEquals(204, send("DELETE", "/v1/subscriptions/" + a, null).statusCode());
+		assertEquals(List.of(b, c), java.util.stream.StreamSupport.stream(json(send("GET", "/v1/subscriptions", null)).get("subscriptions").spliterator(), false)
+				.map(n -> n.get("subscriptionId").asInt()).toList());
+	}
+
+	@Test
+	void theListOfStreamsNeedsNeitherTheBrokerNorTheOrderTokenAndOtherMethodsAreRefused() throws Exception {
+		start(true, false, "a-token-of-at-least-16-chars");
+		HttpResponse<String> r = send("GET", "/v1/subscriptions", null);
+		assertEquals(200, r.statusCode(), "not connected to the broker, a token configured for the orders: " + r.body());
+		assertEquals(405, send("PUT", "/v1/subscriptions", "{}").statusCode());
+		assertEquals(405, send("PATCH", "/v1/subscriptions", "{}").statusCode());
 	}
 
 	@Test

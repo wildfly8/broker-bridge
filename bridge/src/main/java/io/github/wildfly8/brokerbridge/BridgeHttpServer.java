@@ -112,7 +112,10 @@ final class BridgeHttpServer {
 
 	private void subscriptions(HttpExchange ex) throws IOException {
 		String id = tail(ex, "/v1/subscriptions");
-		if (id == null) {
+		if (id == null && "GET".equals(ex.getRequestMethod())) {
+			// the streams the bridge holds and the clients attached to its event stream: needs neither the broker nor a token
+			reply(ex, 200, new Model.SubscriptionList(broker.subscriptions(), hub.clientCount()));
+		} else if (id == null) {
 			expect(ex, "POST", "/v1/subscriptions");
 			int subscriptionId = broker.subscribe(read(ex, SubscriptionRequest.class));
 			reply(ex, 200, new SubscriptionId(subscriptionId));

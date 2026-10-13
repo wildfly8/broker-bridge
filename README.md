@@ -77,7 +77,8 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 | Method | Path | Body → response |
 |---|---|---|
 | GET | `/v1/status` | → `{connected, serverVersion, accounts (masked), lastError, ordersEnabled, since, dataFarms, startedAt, durable, linkUp}` (`startedAt` changes only when the bridge restarts; `durable`: the order events are journaled on disk, so a restart keeps them; `linkUp`: false from IB's error 1100 until 1101 or 1102 or a new connection, because IB's own link to the broker's servers can be lost while the socket to the Gateway stays open; orders, modifications and cancels get a retryable 503 meanwhile) |
-| POST | `/v1/subscriptions` | `{instrument, tag, snapshot, genericTicks}` → `{subscriptionId}` · 503 disconnected |
+| POST | `/v1/subscriptions` | `{instrument, tag, snapshot, genericTicks, owner}` → `{subscriptionId}` · 503 disconnected (`owner` is optional: an opaque mark of whoever opened the stream, listed back by the route below) |
+| GET | `/v1/subscriptions` | → `{subscriptions: [{subscriptionId, tag, owner, instrument, snapshot, genericTicks}], eventClients}`: the streams the bridge holds, by id (`owner` and `genericTicks` left out when there are none), and the number of clients attached to `/v1/events` now, the caller's own included; needs neither the broker nor a token |
 | DELETE | `/v1/subscriptions/{id}` | → 204 |
 | POST | `/v1/snapshots` | `{instrument, field: BID|ASK|LAST|CLOSE, timeoutMs}` → `{bid, ask, last, close, time}` · 504 timeout |
 | POST | `/v1/history` | `{instrument, end, duration, barSize, what, regularHoursOnly, timeoutMs}` → `{bars: [{time, open, high, low, close, volume, count, wap}]}` · 429 pacing, with `Retry-After` when the broker named a wait |
@@ -157,6 +158,12 @@ keep working. Removing or renaming a field, or changing its meaning, needs `/v2`
   away is not recovered (the order's final status is, and its `filled` shows what it came to); orders placed under another
   `IB_CLIENT_ID` are not listed for this client and would be concluded `Inactive`: cancel them in the broker's own
   application before changing the client id.
+- **Streams a client left behind.** The bridge keeps every streaming subscription until it is told to cancel it, and subscribes
+  it again after each reconnect of the broker, so the streams of a client that was stopped hard go on sending quotes, and each
+  holds one of the account's market-data lines (IB's default is 100). A client that marks its streams with an `owner` (a run id
+  of its own) can list them (`GET /v1/subscriptions`) and cancel the ones that are not its own with `DELETE`; `eventClients` tells
+  whether another client is attached to the event stream, which may be a run that is still going and whose streams would be taken
+  away.
 - Order ids: the caller's `clientOrderId` is mapped to the broker's order id inside the bridge; status, fills and order
   errors come back with the `clientOrderId`. With `BRIDGE_DATA_DIR` the mapping is journaled, so events for
   earlier orders still arrive after a bridge restart. A broker order id that belongs to another order is never used

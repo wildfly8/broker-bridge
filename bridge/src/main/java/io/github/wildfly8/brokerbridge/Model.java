@@ -33,7 +33,22 @@ public final class Model {
 
 	public record Bar(String time, double open, double high, double low, double close, Double volume, Integer count, Double wap) {}
 
-	public record SubscriptionRequest(Instrument instrument, String tag, Boolean snapshot, String genericTicks) {}
+	/**
+	 * {@code owner}: an opaque mark of whoever opened the stream, listed back by {@code GET /v1/subscriptions} so that a client can tell its own
+	 * streams from those an earlier run of it left behind (a run id, for instance).
+	 */
+	public record SubscriptionRequest(Instrument instrument, String tag, Boolean snapshot, String genericTicks, String owner) {
+
+		public SubscriptionRequest(Instrument instrument, String tag, Boolean snapshot, String genericTicks) {
+			this(instrument, tag, snapshot, genericTicks, null);
+		}
+	}
+
+	/** One stream the bridge holds, as {@code GET /v1/subscriptions} lists it; {@code owner} and {@code genericTicks} are left out when there are none. */
+	public record SubscriptionInfo(int subscriptionId, String tag, String owner, Instrument instrument, boolean snapshot, String genericTicks) {}
+
+	/** {@code eventClients}: the clients attached to {@code /v1/events} now, the caller's own included. */
+	public record SubscriptionList(List<SubscriptionInfo> subscriptions, int eventClients) {}
 
 	public record SnapshotRequest(Instrument instrument, String field, Long timeoutMs) {}
 

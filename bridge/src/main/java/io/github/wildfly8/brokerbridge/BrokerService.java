@@ -68,6 +68,14 @@ final class BrokerService {
 		return id;
 	}
 
+	/** The streams the bridge holds, by id: what it re-sends after a reconnect of the broker. */
+	List<Model.SubscriptionInfo> subscriptions() {
+		return state.subscriptions.entrySet().stream().sorted(Map.Entry.comparingByKey())
+				.map(e -> new Model.SubscriptionInfo(e.getKey(), e.getValue().tag(), e.getValue().owner(), e.getValue().instrument(),
+						Boolean.TRUE.equals(e.getValue().snapshot()), e.getValue().genericTicks()))
+				.toList();
+	}
+
 	void unsubscribe(int id) {
 		if (state.subscriptions.remove(id) != null && client.isConnected()) {
 			client.cancelMktData(id);
