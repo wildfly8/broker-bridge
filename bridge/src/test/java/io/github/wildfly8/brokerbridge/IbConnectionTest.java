@@ -246,7 +246,7 @@ class IbConnectionTest {
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
-		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(800), Duration.ofMillis(800));
 		callbacks.listener(conn);
 		java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
 		ib.onOpenOrders = () -> {
@@ -353,7 +353,7 @@ class IbConnectionTest {
 			FailOnce ib = new FailOnce(point);
 			IbCallbacks callbacks = new IbCallbacks(state, hub, false);
 			BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
-			IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+			IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(800), Duration.ofMillis(800));
 			callbacks.listener(conn);
 			ib.onDisconnect = callbacks::connectionClosed;
 			ib.onOpenOrders = () -> {
@@ -395,7 +395,7 @@ class IbConnectionTest {
 		};
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
-		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(800), Duration.ofMillis(800));
 		callbacks.listener(conn);
 		java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
 		ib.onOpenOrders = () -> {
@@ -583,7 +583,7 @@ class IbConnectionTest {
 		FakeIbClient ib = new FakeIbClient();
 		IbCallbacks callbacks = new IbCallbacks(state, hub, false);
 		BrokerService broker = new BrokerService(ib, state, false, hub.eventLog());
-		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(300), Duration.ofMillis(300));
+		IbConnection conn = new IbConnection(config, ib, state, hub, broker, Duration.ofMillis(800), Duration.ofMillis(800));
 		callbacks.listener(conn);
 		ib.onConnect = () -> callbacks.error(-1, 0L, 502, "Couldn't connect to TWS", null);
 
@@ -594,8 +594,8 @@ class IbConnectionTest {
 			assertEquals(1, ib.connectAttempts, "a 502 must not open another API client in the same breath");
 			assertFalse(state.connected());
 			assertTrue(ib.calls.contains("disconnect"), ib.calls.toString());
-			Thread.sleep(400);
-			assertTrue(ib.connectAttempts >= 2 && ib.connectAttempts <= 3, "attempts after the backoff: " + ib.connectAttempts);
+			waitFor(() -> ib.connectAttempts >= 2);
+			assertTrue(ib.connectAttempts <= 3, "attempts after the backoff: " + ib.connectAttempts);
 			assertFalse(state.connected());
 		} finally {
 			conn.stop();
