@@ -181,7 +181,22 @@ class BridgeHttpServerTest {
 		assertEquals(200, r.statusCode(), r.body());
 		assertEquals(500.0, json(r).get("bid").asDouble());
 		assertEquals(500.1, json(r).get("ask").asDouble());
+		assertFalse(json(r).has("delayed"), "live ticks: no flag");
 		assertTrue(state.snapshots.isEmpty());
+	}
+
+	@Test
+	void aSnapshotOfDelayedTicksSaysSo() throws Exception {
+		start(false, true);
+		ib.onMktData = (id, snapshot) -> {
+			callbacks.tickPrice(id, 66, 500.0, new TickAttrib());
+			callbacks.tickPrice(id, 67, 500.1, new TickAttrib());
+			callbacks.tickSnapshotEnd(id);
+		};
+		HttpResponse<String> r = send("POST", "/v1/snapshots", "{\"instrument\":" + SPY + "}");
+		assertEquals(200, r.statusCode(), r.body());
+		assertEquals(500.0, json(r).get("bid").asDouble(), "delayed codes are folded into the live fields");
+		assertTrue(json(r).get("delayed").asBoolean(), r.body());
 	}
 
 	@Test

@@ -119,12 +119,13 @@ final class BridgeState {
 		final Integer wantedCode;
 		final CompletableFuture<SnapshotResult> done = new CompletableFuture<>();
 		private Double bid, ask, last, close;
+		private boolean delayed;
 
 		Snapshot(Integer wantedCode) {
 			this.wantedCode = wantedCode;
 		}
 
-		synchronized void price(int code, double price) {
+		synchronized void price(int code, double price, boolean delayedTick) {
 			switch (code) {
 				case QuoteFields.BID -> bid = price;
 				case QuoteFields.ASK -> ask = price;
@@ -132,13 +133,14 @@ final class BridgeState {
 				case QuoteFields.CLOSE -> close = price;
 				default -> { return; }
 			}
+			delayed |= delayedTick;
 			if (wantedCode != null && wantedCode == code) {
 				end();
 			}
 		}
 
 		synchronized void end() {
-			done.complete(new SnapshotResult(bid, ask, last, close, Instant.now().toString()));
+			done.complete(new SnapshotResult(bid, ask, last, close, Instant.now().toString(), delayed ? Boolean.TRUE : null));
 		}
 	}
 

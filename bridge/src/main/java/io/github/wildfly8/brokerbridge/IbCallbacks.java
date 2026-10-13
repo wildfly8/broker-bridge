@@ -75,10 +75,10 @@ class IbCallbacks extends DefaultEWrapper {
 		int code = QuoteFields.normalize(field);
 		BridgeState.Snapshot snap = state.snapshots.get(reqId);
 		if (snap != null) {
-			snap.price(code, price);
+			snap.price(code, price, QuoteFields.isDelayed(field));
 			return;
 		}
-		quote(reqId, code, price, null, null, null);
+		quote(reqId, code, price, null, null, null, QuoteFields.isDelayed(field));
 	}
 
 	@Override
@@ -86,7 +86,7 @@ class IbCallbacks extends DefaultEWrapper {
 		if (state.snapshots.containsKey(reqId)) {
 			return;
 		}
-		quote(reqId, QuoteFields.normalize(field), null, number(size), null, null);
+		quote(reqId, QuoteFields.normalize(field), null, number(size), null, null, QuoteFields.isDelayed(field));
 	}
 
 	@Override
@@ -96,7 +96,7 @@ class IbCallbacks extends DefaultEWrapper {
 			return;
 		}
 		try {
-			quote(reqId, code, null, null, null, Instant.ofEpochSecond(Long.parseLong(value.trim())).toString());
+			quote(reqId, code, null, null, null, Instant.ofEpochSecond(Long.parseLong(value.trim())).toString(), QuoteFields.isDelayed(field));
 		} catch (NumberFormatException e) {
 			log.debug("Ignoring timestamp tick {}", value);
 		}
@@ -111,7 +111,7 @@ class IbCallbacks extends DefaultEWrapper {
 		}
 		OptionValues values = new OptionValues(nonNegative(impliedVol), computed(delta), computed(gamma),
 				computed(theta), computed(vega), nonNegative(optPrice), nonNegative(undPrice));
-		quote(reqId, code, null, null, values, null);
+		quote(reqId, code, null, null, values, null, QuoteFields.isDelayed(field));
 	}
 
 	@Override
@@ -127,13 +127,14 @@ class IbCallbacks extends DefaultEWrapper {
 		}
 	}
 
-	private void quote(int reqId, int code, Double price, Double size, OptionValues option, String time) {
+	/** {@code delayed}: the broker's field code was a delayed-data code, which {@link QuoteFields#normalize} folds into the live field; the event says so. */
+	private void quote(int reqId, int code, Double price, Double size, OptionValues option, String time, boolean delayed) {
 		SubscriptionRequest sub = state.subscriptions.get(reqId);
 		if (sub == null) {
 			return;
 		}
 		hub.publish("quote", new QuoteEvent(sub.tag(), reqId, QuoteFields.name(code), code, price, size, option,
-				time != null ? time : Instant.now().toString()));
+				time != null ? time : Instant.now().toString(), delayed ? Boolean.TRUE : null));
 	}
 
 	// ---- history and contract details ----

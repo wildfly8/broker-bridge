@@ -91,10 +91,13 @@ All bodies are JSON; errors are `{"error": "…"}` (plus `"retryable": true` whe
 expiry, right: CALL|PUT, strike, multiplier, brokerId, legs: [{brokerId, ratio, side, exchange}]}`.
 
 **Quote event**: `{tag, subscriptionId, field, code, price, size, option: {impliedVol, delta, gamma, theta, vega,
-optionPrice, underlyingPrice}, time}`. `code` is the broker's own numeric field code (with the IB adapter, an IB tick
+optionPrice, underlyingPrice}, time, delayed}`. `code` is the broker's own numeric field code (with the IB adapter, an IB tick
 type) (0 bid size, 1 bid, 2 ask, 3 ask size,
 4 last, 5 last size, 6 high, 7 low, 8 volume, 9 close, 10–13 option computations, 14 open, 45 last timestamp);
-delayed-data codes are reported as their live equivalents.
+delayed-data codes are reported as their live equivalents, and the event says so: `delayed` is `true` when the broker's tick
+was a delayed one (whatever the market-data type that was asked for, and whether or not the account has a subscription: it is
+the tick's own code that tells) and is left out otherwise. A snapshot (`POST /v1/snapshots`) carries `delayed: true` when any
+tick that made it up was a delayed one. A client that must not act on prices of up to 15 minutes ago can ignore such a tick.
 
 **Event ids and resume**: every event has an SSE `id:` (a number that keeps increasing, also
 across restarts). Order events (`order-status`, `fill`, and `error` with a `clientOrderId`)

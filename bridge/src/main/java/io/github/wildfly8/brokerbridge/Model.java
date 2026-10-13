@@ -28,8 +28,15 @@ public final class Model {
 	public record OptionValues(Double impliedVol, Double delta, Double gamma, Double theta, Double vega, Double optionPrice,
 			Double underlyingPrice) {}
 
+	/** {@code delayed}: true when the broker's tick was a delayed one (its field code is a delayed-data code); left out otherwise. */
 	public record QuoteEvent(String tag, int subscriptionId, String field, int code, Double price, Double size,
-			OptionValues option, String time) {}
+			OptionValues option, String time, Boolean delayed) {
+
+		public QuoteEvent(String tag, int subscriptionId, String field, int code, Double price, Double size,
+				OptionValues option, String time) {
+			this(tag, subscriptionId, field, code, price, size, option, time, null);
+		}
+	}
 
 	public record Bar(String time, double open, double high, double low, double close, Double volume, Integer count, Double wap) {}
 
@@ -52,7 +59,13 @@ public final class Model {
 
 	public record SnapshotRequest(Instrument instrument, String field, Long timeoutMs) {}
 
-	public record SnapshotResult(Double bid, Double ask, Double last, Double close, String time) {}
+	/** {@code delayed}: true when any tick that made up the snapshot was a delayed one; left out otherwise. */
+	public record SnapshotResult(Double bid, Double ask, Double last, Double close, String time, Boolean delayed) {
+
+		public SnapshotResult(Double bid, Double ask, Double last, Double close, String time) {
+			this(bid, ask, last, close, time, null);
+		}
+	}
 
 	public record HistoryRequest(Instrument instrument, String end, String duration, String barSize, String what,
 			Boolean regularHoursOnly, Long timeoutMs) {}

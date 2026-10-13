@@ -78,6 +78,54 @@ class IbCallbacksTest {
 		assertEquals(200.0, size.get("size").asDouble());
 		assertEquals("LAST", json(ev.get(2)[1]).get("field").asText());
 		assertEquals(4, json(ev.get(2)[1]).get("code").asInt());
+		assertFalse(bid.has("delayed"), "a live tick says nothing of delay");
+		assertFalse(json(ev.get(1)[1]).has("delayed"));
+		assertTrue(json(ev.get(2)[1]).get("delayed").asBoolean(), "a delayed-data code is told, whatever live field it is folded into");
+	}
+
+	@Test
+	void everyKindOfDelayedTickIsToldAsDelayed() throws Exception {
+		callbacks.tickPrice(42, 66, 501.2, new TickAttrib());                          // delayed bid
+		callbacks.tickSize(42, 69, Decimal.get(BigDecimal.valueOf(300)));             // delayed bid size
+		callbacks.tickString(42, 88, "1790000000");                                    // delayed last timestamp
+		callbacks.tickOptionComputation(42, 83, 0, 0.3, 0.5, 2.0, 0, 0.1, 0.2, -0.1, 500.0); // delayed model computation
+		callbacks.tickOptionComputation(42, 13, 0, 0.3, 0.5, 2.0, 0, 0.1, 0.2, -0.1, 500.0); // live model computation
+		callbacks.tickString(42, 45, "1790000000");                                    // live last timestamp
+		List<String[]> ev = drain();
+		assertEquals(6, ev.size());
+		for (int i = 0; i < 4; i++) {
+			assertTrue(json(ev.get(i)[1]).get("delayed").asBoolean(), "event " + i + ": " + ev.get(i)[1]);
+		}
+		assertFalse(json(ev.get(4)[1]).has("delayed"), ev.get(4)[1]);
+		assertFalse(json(ev.get(5)[1]).has("delayed"), ev.get(5)[1]);
+		assertEquals("BID", json(ev.get(0)[1]).get("field").asText(), "and the field is the live one");
+	}
+
+	@Test
+	void aSnapshotIsDelayedWhenAnyTickThatMadeItWasAndLiveOtherwise() throws Exception {
+		BridgeState.Snapshot live = new BridgeState.Snapshot(null);
+		state.snapshots.put(70, live);
+		callbacks.tickPrice(70, 1, 500.0, new TickAttrib());
+		callbacks.tickPrice(70, 2, 500.1, new TickAttrib());
+		callbacks.tickSnapshotEnd(70);
+		assertNull(live.done.get().delayed(), "all live ticks: the field is left out");
+		BridgeState.Snapshot delayed = new BridgeState.Snapshot(null);
+		state.snapshots.put(71, delayed);
+		callbacks.tickPrice(71, 1, 500.0, new TickAttrib());
+		callbacks.tickPrice(71, 67, 500.1, new TickAttrib());
+		callbacks.tickPrice(71, 2, 500.2, new TickAttrib());
+		callbacks.tickSnapshotEnd(71);
+		assertEquals(Boolean.TRUE, delayed.done.get().delayed(), "one delayed tick of three");
+		BridgeState.Snapshot onlyOne = new BridgeState.Snapshot(QuoteFields.LAST);
+		state.snapshots.put(72, onlyOne);
+		callbacks.tickPrice(72, 68, 500.3, new TickAttrib());
+		assertEquals(Boolean.TRUE, onlyOne.done.get().delayed(), "the wanted field arrived as a delayed one");
+		BridgeState.Snapshot ignored = new BridgeState.Snapshot(null);
+		state.snapshots.put(73, ignored);
+		callbacks.tickPrice(73, 6, 1.0, new TickAttrib());                              // a field the snapshot does not keep
+		callbacks.tickPrice(73, 72, 1.0, new TickAttrib());                             // delayed high: not kept either
+		callbacks.tickSnapshotEnd(73);
+		assertNull(ignored.done.get().delayed(), "a tick the snapshot does not keep makes it neither live nor delayed");
 	}
 
 	@Test

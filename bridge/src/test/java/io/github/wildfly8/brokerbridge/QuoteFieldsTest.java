@@ -1,6 +1,8 @@
 package io.github.wildfly8.brokerbridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +23,16 @@ class QuoteFieldsTest {
 		}
 		assertEquals("OTHER", QuoteFields.name(21), "a code the bridge does not name is OTHER, and the client reads the code");
 		assertEquals("OTHER", QuoteFields.name(999));
+	}
+
+	@Test
+	void theDelayedCodesAreTold() {
+		for (int delayed : new int[] { 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 80, 81, 82, 83, 88 }) {
+			assertTrue(QuoteFields.isDelayed(delayed), "code " + delayed);
+		}
+		for (int live : new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 45, 77, 99, 999 }) {
+			assertFalse(QuoteFields.isDelayed(live), "code " + live);
+		}
 	}
 
 	@Test

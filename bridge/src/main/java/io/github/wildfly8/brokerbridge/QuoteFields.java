@@ -34,6 +34,11 @@ final class QuoteFields {
 		return DELAYED.getOrDefault(code, code);
 	}
 
+	/** Whether the broker's field code is a delayed-data code (which {@link #normalize} folds into its live equivalent). */
+	static boolean isDelayed(int code) {
+		return DELAYED.containsKey(code);
+	}
+
 	static String name(int code) {
 		return NAMES.getOrDefault(code, "OTHER");
 	}
