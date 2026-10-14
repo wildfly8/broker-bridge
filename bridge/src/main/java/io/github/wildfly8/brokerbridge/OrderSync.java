@@ -48,6 +48,7 @@ final class OrderSync {
 	private final CompletableFuture<Void> openEnded = new CompletableFuture<>();
 	private final CompletableFuture<Void> completedEnded = new CompletableFuture<>();
 	private final CompletableFuture<Void> aborted = new CompletableFuture<>();
+	private volatile String notEnded;
 
 	OrderSync(List<EventLog.OrderRecord> armed) {
 		this.armed = List.copyOf(armed);
@@ -85,15 +86,37 @@ final class OrderSync {
 	 * most {@link #COMPLETED_TIMEOUT_MS} more), or the connection is lost. Returns whether the list of open orders ended.
 	 */
 	boolean await(long openTimeoutMs, long completedTimeoutMs) throws InterruptedException {
+		notEnded = null;
 		if (!waitFor(openEnded, openTimeoutMs)) {
-			log.warn("IB did not end its list of open orders within {} ms: no order is concluded to have ended", openTimeoutMs);
+			notEnded = openNotEnded(aborted.isDone(), openTimeoutMs);
+			log.warn(notEnded);
 			return false;
 		}
 		if (!waitFor(completedEnded, completedTimeoutMs)) {
-			log.warn("IB did not end its list of completed orders within {} ms: the orders it does not list as open are given the status {}",
-					completedTimeoutMs, UNLISTED_STATUS);
+			notEnded = completedNotEnded(aborted.isDone(), completedTimeoutMs);
+			log.warn(notEnded);
 		}
 		return openEnded();
+	}
+
+	/** Why the last {@link #await} did not see a list end, in the words it logged; null when both lists ended. */
+	String notEnded() {
+		return notEnded;
+	}
+
+	/**
+	 * The log line for a list of open orders that did not end. A lost connection ends the wait at once, and then it is not "within N ms": on 2026-10-14
+	 * the Gateway dropped a handshake 160 ms after it began, and the line said 15000.
+	 */
+	static String openNotEnded(boolean connectionLost, long timeoutMs) {
+		return connectionLost ? "The connection was lost before IB ended its list of open orders: no order is concluded to have ended"
+				: "IB did not end its list of open orders within " + timeoutMs + " ms: no order is concluded to have ended";
+	}
+
+	/** The log line for a list of completed orders that did not end (the open orders' list had), as {@link #openNotEnded}. */
+	static String completedNotEnded(boolean connectionLost, long timeoutMs) {
+		return connectionLost ? "The connection was lost before IB ended its list of completed orders: no order is concluded to have ended"
+				: "IB did not end its list of completed orders within " + timeoutMs + " ms: the orders it does not list as open are given the status " + UNLISTED_STATUS;
 	}
 
 	private boolean waitFor(CompletableFuture<Void> list, long timeoutMs) throws InterruptedException {
