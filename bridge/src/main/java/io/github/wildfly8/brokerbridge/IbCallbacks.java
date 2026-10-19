@@ -255,7 +255,7 @@ class IbCallbacks extends DefaultEWrapper {
 		}
 		hub.publishOrderEvent("order-status", new OrderStatusEvent(ref.clientOrderId(), status, number(filled),
 				number(remaining), avgFillPrice, lastFillPrice, String.valueOf(permId),
-				parentId == 0 ? null : String.valueOf(parentId), ref.tag(), whyHeld));
+				parentId == 0 ? null : String.valueOf(parentId), ref.tag(), whyHeld, ref.instrument()));
 	}
 
 	@Override

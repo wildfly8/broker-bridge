@@ -365,6 +365,37 @@ class IbCallbacksTest {
 		assertTrue(hub.eventLog().firstFill("0004.01"), "a fill that was dropped can still be delivered once its order is known");
 	}
 
+	/** specs/002 FR-BRK-32: a status names the instrument of its order (a status carries no contract otherwise), the one the bridge holds for it. */
+	@Test
+	void aStatusNamesTheInstrumentOfItsOrder() throws Exception {
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));
+		state.ordersByIbId.put(8, new BridgeState.OrderRef(7002L, "4", new Instrument("SPY", "OPTION", "SMART", null, "USD", "20261218", "CALL", 500.0, null, null, null)));
+		callbacks.orderStatus(7, "Submitted", Decimal.ZERO, Decimal.get(BigDecimal.valueOf(1)), 0, 99L, 0, 0, 11, null, 0);
+		callbacks.orderStatus(8, "Cancelled", Decimal.ZERO, Decimal.get(BigDecimal.valueOf(2)), 0, 98L, 0, 0, 11, null, 0);
+		List<String[]> ev = drain();
+		assertEquals(2, ev.size());
+		JsonNode stock = json(ev.get(0)[1]).get("instrument");
+		assertEquals("SPY", stock.get("symbol").asText());
+		assertEquals("STOCK", stock.get("type").asText());
+		JsonNode option = json(ev.get(1)[1]).get("instrument");
+		assertEquals("SPY", option.get("symbol").asText());
+		assertEquals("OPTION", option.get("type").asText());
+		assertEquals("20261218", option.get("expiry").asText());
+		assertEquals(500.0, option.get("strike").asDouble());
+		assertEquals("CALL", option.get("right").asText());
+	}
+
+	/** An order whose reference holds no instrument (one that an older bridge journaled) has a status without the field: it is left out, not null. */
+	@Test
+	void aStatusOfAnOrderWithoutAnInstrumentLeavesTheFieldOut() throws Exception {
+		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", null));
+		callbacks.orderStatus(7, "Cancelled", Decimal.ZERO, Decimal.get(BigDecimal.valueOf(1)), 0, 99L, 0, 0, 11, null, 0);
+		List<String[]> ev = drain();
+		assertEquals(1, ev.size());
+		assertFalse(ev.get(0)[1].contains("instrument"), ev.get(0)[1]);
+		assertEquals("Cancelled", json(ev.get(0)[1]).get("status").asText());
+	}
+
 	@Test
 	void ordersStatusAndFillsUseClientOrderId() throws Exception {
 		state.ordersByIbId.put(7, new BridgeState.OrderRef(7001L, "4", Instrument.stock("SPY", "SMART", "USD")));

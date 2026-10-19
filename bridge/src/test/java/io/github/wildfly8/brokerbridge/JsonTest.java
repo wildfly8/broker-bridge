@@ -20,6 +20,19 @@ class JsonTest {
 		assertNull(Json.maskAccounts(null));
 	}
 
+	/** specs/002 FR-BRK-32: the event's own JSON has the instrument when the bridge holds it, and no field at all when it does not; the old shape still reads. */
+	@Test
+	void anOrderStatusHasTheInstrumentOnlyWhenTheBridgeHoldsIt() throws Exception {
+		String with = Json.write(new Model.OrderStatusEvent(7001L, "Cancelled", 0.0, 1.0, null, null, "99", null, "4", null, Instrument.stock("SPY", "SMART", "USD")));
+		assertEquals("SPY", Json.MAPPER.readTree(with).get("instrument").get("symbol").asText());
+		String without = Json.write(new Model.OrderStatusEvent(7001L, "Cancelled", 0.0, 1.0, null, null, "99", null, "4", null));
+		assertFalse(without.contains("instrument"), without);
+		assertFalse(without.contains("null"), without);
+		Model.OrderStatusEvent old = Json.MAPPER.readValue("{\"clientOrderId\":7001,\"status\":\"Filled\",\"tag\":\"4\"}", Model.OrderStatusEvent.class);
+		assertNull(old.instrument());
+		assertEquals("Filled", old.status());
+	}
+
 	@Test
 	void omitsNullsAndIgnoresUnknownFields() throws Exception {
 		String json = Json.write(Instrument.stock("SPY", "SMART", "USD"));

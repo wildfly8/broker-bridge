@@ -150,9 +150,9 @@ final class OrderSync {
 			OrderStatusEvent event;
 			if (c != null && c.status() != null && EventLog.isFinalStatus(c.status())) {
 				Double remaining = c.total() != null && c.filled() != null ? c.total() - c.filled() : null;
-				event = new OrderStatusEvent(id, c.status(), c.filled(), remaining, null, null, null, null, tag, COMPLETED_REASON);
+				event = new OrderStatusEvent(id, c.status(), c.filled(), remaining, null, null, null, null, tag, COMPLETED_REASON, rec.instrument());
 			} else {
-				event = new OrderStatusEvent(id, UNLISTED_STATUS, null, null, null, null, null, null, tag, UNLISTED_REASON);
+				event = new OrderStatusEvent(id, UNLISTED_STATUS, null, null, null, null, null, null, tag, UNLISTED_REASON, rec.instrument());
 			}
 			hub.publishOrderEvent("order-status", event);
 			log.info("Order {} (broker {}) is no longer open at IB: {} ({})", id, rec.brokerOrderId(), event.status(), event.whyHeld());

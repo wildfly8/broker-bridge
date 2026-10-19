@@ -101,6 +101,10 @@ was a delayed one (whatever the market-data type that was asked for, and whether
 the tick's own code that tells) and is left out otherwise. A snapshot (`POST /v1/snapshots`) carries `delayed: true` when any
 tick that made it up was a delayed one. A client that must not act on prices of up to 15 minutes ago can ignore such a tick.
 
+**Order status**: `order-status` carries the optional `instrument` of its order (the `Instrument` below, the one of the order request and of `fill`), from the reference the bridge holds for every order it placed or
+adopted, also in the statuses it concludes at a connection; it is left out when the bridge does not hold it (an event that an earlier bridge journaled has none). A status carries no contract otherwise: a client that did not place
+the order (one posted straight at the bridge) has nothing else to name it by. API v1 grows by optional fields; a client ignores what it does not know.
+
 **Event ids and resume**: every event has an SSE `id:` (a number that keeps increasing, also
 across restarts). Order events (`order-status`, `fill`, and `error` with a `clientOrderId`)
 are kept and, with `BRIDGE_DATA_DIR`, journaled to disk (fsync per event). Reconnect with the

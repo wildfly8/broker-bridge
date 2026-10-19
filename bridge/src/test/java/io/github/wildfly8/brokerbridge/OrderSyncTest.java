@@ -64,6 +64,7 @@ class OrderSyncTest {
 		assertEquals("Inactive", s.get(0).get("status").asText());
 		assertEquals("not among IB's open orders when the bridge connected", s.get(0).get("whyHeld").asText());
 		assertEquals("3", s.get(0).get("tag").asText(), "the event goes back to the listener that placed the order");
+		assertEquals("SPY", s.get(0).get("instrument").get("symbol").asText(), "and names the instrument of the order (specs/002 FR-BRK-32)");
 		assertTrue(hub.eventLog().isFinal(7001), "journaled like any order event");
 	}
 

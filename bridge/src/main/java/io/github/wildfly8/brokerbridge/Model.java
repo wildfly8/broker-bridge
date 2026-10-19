@@ -76,8 +76,18 @@ public final class Model {
 			String type, Double limitPrice, Double stopPrice, String timeInForce, Boolean allOrNone,
 			String orderRef, Boolean modify) {}
 
+	/**
+	 * {@code instrument}: the order's own, from the reference the bridge holds for it (placed, or adopted from the broker's open orders); left out
+	 * when the bridge does not hold it (an event that an earlier bridge journaled has none). A status carries no contract otherwise.
+	 */
 	public record OrderStatusEvent(Long clientOrderId, String status, Double filled, Double remaining, Double avgFillPrice,
-			Double lastFillPrice, String permId, String parentId, String tag, String whyHeld) {}
+			Double lastFillPrice, String permId, String parentId, String tag, String whyHeld, Instrument instrument) {
+
+		public OrderStatusEvent(Long clientOrderId, String status, Double filled, Double remaining, Double avgFillPrice,
+				Double lastFillPrice, String permId, String parentId, String tag, String whyHeld) {
+			this(clientOrderId, status, filled, remaining, avgFillPrice, lastFillPrice, permId, parentId, tag, whyHeld, null);
+		}
+	}
 
 	public record FillEvent(Long clientOrderId, String fillId, String side, Double quantity, Double price, Double avgPrice,
 			Double cumQuantity, String exchange, String permId, String tag, String time, Instrument instrument) {}
